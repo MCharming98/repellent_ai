@@ -48,7 +48,7 @@ The onboarding pipeline runs three workflows in sequence:
 
 ### Supporting Modules
 
-- **tools.py** — Utilities for file and directory operations, git contributor lookup, and file I/O, used across workflows.
+- **utils/** — Package with utilities for file/directory operations (`utils/files`), git contributor lookup (`utils/git`), used across workflows.
 
 ## Output
 
