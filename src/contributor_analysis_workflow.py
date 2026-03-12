@@ -3,9 +3,24 @@ import time
 from pathlib import PurePath
 from typing_extensions import TypedDict
 from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
 from utils import *
+
+CONTRIBUTOR_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "description": "Contributor analysis of the repository",
+    "properties": {
+        "text": {
+            "type": "string",
+            "description": "The full contributor analysis in markdown format",
+        }
+    },
+    "required": ["text"],
+}
+
+
 class ContributorAnalysisWorkflow():
     def __init__(self, read_directory: str, write_directory: str, model: str, model_provider: str, api_key: str):
         self.read_directory = read_directory
@@ -64,7 +79,8 @@ class ContributorAnalysisWorkflow():
         if self.model_provider == "google_genai":
             model_kwargs["google_api_key"] = self.api_key
         agent = create_agent(
-            model=init_chat_model(self.model, model_provider=self.model_provider, **model_kwargs)
+            model=init_chat_model(self.model, model_provider=self.model_provider, **model_kwargs),
+            response_format=ToolStrategy(CONTRIBUTOR_ANALYSIS_SCHEMA),
         )
         result = agent.invoke(
             {"messages": [{"role": "user", "content": prompt}]}
@@ -73,8 +89,7 @@ class ContributorAnalysisWorkflow():
         thread.join()
         elapsed = time.perf_counter() - start_time
         print(f"\rContributor Analysis Workflow: Generating contributor analysis completed in {elapsed:.2f}s")
-        # print(result['messages'][1].content)
-        return {'contributor_analysis': result['messages'][1].content}
+        return {"contributor_analysis": result["structured_response"]["text"]}
 
     def write_analysis_to_file(self, state: State):
         print(f"Contributor Analysis Workflow: Writing contributor analysis to {state['write_directory']}contributor_analysis.md")

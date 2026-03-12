@@ -1,11 +1,26 @@
 import threading
 import time
-from typing_extensions import TypedDict
 from pathlib import PurePath
+from typing_extensions import TypedDict
 from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
 from utils import *
+
+BUSINESS_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "description": "Business and Critical User Journey analysis of the product",
+    "properties": {
+        "text": {
+            "type": "string",
+            "description": "The full business and CUJ analysis in markdown format",
+        }
+    },
+    "required": ["text"],
+}
+
+
 class BusinessAnalysisWorkflow():
     def __init__(self, read_directory: str, write_directory: str, model: str, model_provider: str, api_key: str):
         self.read_directory = read_directory
@@ -45,7 +60,8 @@ class BusinessAnalysisWorkflow():
             File analysis input: {input}
             """
         agent = create_agent(
-            model=init_chat_model(self.model, model_provider=self.model_provider, api_key=self.api_key)
+            model=init_chat_model(self.model, model_provider=self.model_provider, api_key=self.api_key),
+            response_format=ToolStrategy(BUSINESS_ANALYSIS_SCHEMA),
         )
         result = agent.invoke(
             {"messages": [{"role": "user", "content": prompt}]}
@@ -54,11 +70,10 @@ class BusinessAnalysisWorkflow():
         thread.join()
         elapsed = time.perf_counter() - start_time
         print(f"\rBusiness Analysis Workflow: Generating analysis completed in {elapsed:.2f}s")
-        # print(result['messages'][1].content)
-        return {'business_analysis': result['messages'][1].content}
+        return {"business_analysis": result["structured_response"]["text"]}
 
     def write_analysis_to_file(self, state: State):
-        print(f"Business Analysis Workflow: Writing analysis to {state['write_directory']}business_analysis.md")
+        print(f"Business Analysis Workflow: Writing analysis to {state['write_directory']}/business_analysis.md")
         output_path = PurePath(state["write_directory"], "business_analysis.md")
         write_to_file(str(output_path), state["business_analysis"], 'w')
 

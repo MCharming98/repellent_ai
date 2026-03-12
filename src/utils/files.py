@@ -170,6 +170,9 @@ def write_to_file(path: str, content: str, mode: Literal['w', 'a'] = 'a') -> Non
 
     try:
         with open(file_path, mode, encoding='utf-8') as f:
-            f.write(content)
+            if not content is str:
+                print(f"Warning: Content is not a string but {type(content)}, converting to string")
+                content = str(content)
+            f.write(str(content))
     except IOError as e:
         raise IOError(f"Cannot write to file '{path}': {str(e)}") from e
