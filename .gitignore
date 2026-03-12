@@ -36,9 +36,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Credentials
-credentials
+# Outputs
 agent_workspace/
 projects/
-
+issues/
 archive/

@@ -12,6 +12,7 @@ from .git import (
     get_contributors,
     get_closed_issues,
     format_issue,
+    parse_github_repo_url,
     save_issues_to_json,
     save_issues_to_text,
 )
@@ -25,6 +26,7 @@ __all__ = [
     'write_to_file',
     'get_contributors',
     'get_closed_issues',
+    'parse_github_repo_url',
     'format_issue',
     'save_issues_to_json',
     'save_issues_to_text',

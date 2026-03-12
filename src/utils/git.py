@@ -2,14 +2,60 @@
 
 import json
 import os
+import re
 import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 GITHUB_API_BASE = "https://api.github.com"
+
+
+def parse_github_repo_url(url: str) -> Optional[Tuple[str, str]]:
+    """
+    Parse owner and repo name from a GitHub URL.
+
+    Supports formats:
+        - https://github.com/owner/repo
+        - http://github.com/owner/repo
+        - github.com/owner/repo
+        - https://github.com/owner/repo.git
+        - https://github.com/owner/repo/
+        - git@github.com:owner/repo.git
+
+    Args:
+        url: A GitHub repository URL or identifier.
+
+    Returns:
+        Tuple of (owner, repo) if valid, None otherwise.
+    """
+    url = url.strip().rstrip("/")
+    if not url:
+        return None
+
+    # git@github.com:owner/repo.git
+    ssh_match = re.match(r"git@github\.com:([^/]+)/([^/]+?)(?:\.git)?$", url)
+    if ssh_match:
+        return (ssh_match.group(1), ssh_match.group(2))
+
+    # Ensure we have something that looks like a host
+    if "github.com" not in url:
+        return None
+
+    # Add scheme if missing for urllib parsing
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.hostname and "github.com" in parsed.hostname:
+        parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(parts) >= 2:
+            repo = parts[-1].removesuffix(".git")
+            owner = parts[-2]
+            return (owner, repo)
+    return None
 
 
 def get_contributors(git_repo_path: str, file_path: str) -> List[str]:
