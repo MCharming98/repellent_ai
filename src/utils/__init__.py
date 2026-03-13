@@ -9,6 +9,7 @@ from .files import (
     write_to_file,
 )
 from .git import (
+    extract_issue_fields,
     get_contributors,
     get_closed_issues,
     format_issue,
@@ -18,6 +19,7 @@ from .git import (
 )
 
 __all__ = [
+    'extract_issue_fields',
     'get_current_working_directory',
     'list_files',
     'list_source_files_recursive',

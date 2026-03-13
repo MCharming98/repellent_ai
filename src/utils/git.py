@@ -8,9 +8,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 GITHUB_API_BASE = "https://api.github.com"
+
+ISSUE_FIELDS = ("url", "comments_url", "events_url", "number", "title", "state")
 
 
 def parse_github_repo_url(url: str) -> Optional[Tuple[str, str]]:
@@ -56,6 +59,29 @@ def parse_github_repo_url(url: str) -> Optional[Tuple[str, str]]:
             owner = parts[-2]
             return (owner, repo)
     return None
+
+
+def extract_issue_fields(
+    issues: Union[List[Dict[str, Any]], str, Path],
+) -> List[Dict[str, Any]]:
+    """
+    Extract url, comments_url, events_url, number, title, and state from issues JSON.
+
+    Args:
+        issues: Either a list of issue dicts, or a path to a JSON file containing
+                an array of issues.
+
+    Returns:
+        List of dicts with keys: url, comments_url, events_url, number, title, state.
+    """
+    if isinstance(issues, (str, Path)):
+        with open(issues, "r", encoding="utf-8") as f:
+            issues = json.load(f)
+
+    if not isinstance(issues, list):
+        raise TypeError(f"Expected list of issues, got {type(issues)}")
+
+    return [{k: issue.get(k) for k in ISSUE_FIELDS} for issue in issues]
 
 
 def get_contributors(git_repo_path: str, file_path: str) -> List[str]:

@@ -5,7 +5,7 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
 
-from utils import get_closed_issues, parse_github_repo_url, save_issues_to_json
+from utils import extract_issue_fields, get_closed_issues, parse_github_repo_url, save_issues_to_json
 
 
 class TrainingWorkflow:
@@ -42,7 +42,7 @@ class TrainingWorkflow:
             max_issues=self.max_issues,
         )
         print(f"Training Workflow: Fetched {len(issues)} issues")
-        return {"issues": issues}
+        return {"issues": extract_issue_fields(issues)}
 
     def save_issues(self, state: State):
         output_path = Path(state["output_path"])
