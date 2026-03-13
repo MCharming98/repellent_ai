@@ -268,11 +268,14 @@ def get_closed_issues(
 
             params["page"] += 1
 
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as e:
+            print(f"get_closed_issues: HTTP Error: {e.code}: {e.reason}")
             break
-        except urllib.error.URLError:
+        except urllib.error.URLError as e:
+            print(f"get_closed_issues: URL Error: {e.reason}")
             break
-        except Exception:
+        except Exception as e:
+            print(f"get_closed_issues: Error: {e}")
             break
 
     return all_issues

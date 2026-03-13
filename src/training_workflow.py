@@ -1,11 +1,19 @@
 """Workflow to fetch closed issues from a GitHub repo for training data."""
 
+import argparse
 from pathlib import Path, PurePath
 from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
 
-from utils import extract_issue_fields, get_closed_issues, parse_github_repo_url, save_issues_to_json
+from utils import (
+    extract_issue_fields,
+    fetch_issue_comments,
+    get_closed_issues,
+    parse_github_repo_url,
+    save_comments_to_json,
+    save_issues_to_json,
+)
 
 
 class TrainingWorkflow:
@@ -51,19 +59,75 @@ class TrainingWorkflow:
         print(f"Training Workflow: Saved to {output_path}")
         return {}
 
+    def fetch_and_save_comments(self, state: State):
+        owner = state["owner"]
+        repo = state["repo"]
+        issues = state["issues"]
+        base_dir = Path(self.output_dir) / repo
+
+        for i, issue in enumerate(issues):
+            issue_number = issue.get("number")
+            if issue_number is None:
+                continue
+            issue_dir = base_dir / str(issue_number)
+            issue_dir.mkdir(parents=True, exist_ok=True)
+            comments = fetch_issue_comments(owner, repo, issue_number)
+            comments_path = PurePath(issue_dir, "comments.json")
+            save_comments_to_json(comments, str(comments_path))
+            print(f"Training Workflow: [{i + 1}/{len(issues)}] Issue #{issue_number}: saved {len(comments)} comments to {comments_path}")
+
+        return {}
+
     def build_workflow(self):
         workflow = StateGraph(self.State)
         workflow.add_node("parse_repo", self.parse_repo)
         workflow.add_node("fetch_issues_metadata", self.fetch_issues_metadata)
         workflow.add_node("save_issues_metadata", self.save_issues_metadata)
+        workflow.add_node("fetch_and_save_comments", self.fetch_and_save_comments)
 
         workflow.add_edge(START, "parse_repo")
         workflow.add_edge("parse_repo", "fetch_issues_metadata")
         workflow.add_edge("fetch_issues_metadata", "save_issues_metadata")
-        workflow.add_edge("save_issues_metadata", END)
+        workflow.add_edge("save_issues_metadata", "fetch_and_save_comments")
+        workflow.add_edge("fetch_and_save_comments", END)
 
         self.workflow = workflow.compile()
 
     def run(self):
         self.build_workflow()
         self.workflow.invoke({"github_url": self.github_url})
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fetch closed issues and comments from a GitHub repo for training data"
+    )
+    parser.add_argument(
+        "--github-url",
+        required=True,
+        dest="github_url",
+        help="GitHub repository URL (e.g. https://github.com/owner/repo)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="issues",
+        help="Output directory for issues (default: issues)",
+    )
+    parser.add_argument(
+        "--max-issues",
+        type=int,
+        default=100,
+        help="Maximum number of issues to fetch (default: 100)",
+    )
+    args = parser.parse_args()
+
+    workflow = TrainingWorkflow(
+        github_url=args.github_url,
+        output_dir=args.output_dir,
+        max_issues=args.max_issues,
+    )
+    workflow.run()
+
+
+if __name__ == "__main__":
+    main()
