@@ -84,6 +84,106 @@ def extract_issue_fields(
     return [{k: issue.get(k) for k in ISSUE_FIELDS} for issue in issues]
 
 
+def parse_github_issue_url(url: str) -> Tuple[str, str, int]:
+    """
+    Parse a GitHub issue URL to extract owner, repo, and issue number.
+
+    Supports both web URLs and API URLs:
+        - https://github.com/owner/repo/issues/123
+        - https://api.github.com/repos/owner/repo/issues/123
+        - https://api.github.com/repos/owner/repo/issues/123/comments
+
+    Returns:
+        Tuple of (owner, repo, issue_number).
+
+    Raises:
+        ValueError: If URL format is not recognized.
+    """
+    web_pattern = r"github\.com/([^/]+)/([^/]+)/issues/(\d+)"
+    api_pattern = r"api\.github\.com/repos/([^/]+)/([^/]+)/issues/(\d+)"
+
+    for pattern in (web_pattern, api_pattern):
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1), match.group(2), int(match.group(3))
+
+    raise ValueError(f"Could not parse GitHub issue URL: {url}")
+
+
+def fetch_issue_comments(
+    owner: str,
+    repo: str,
+    issue_number: int,
+    per_page: int = 100,
+    token: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Fetch comments from a GitHub issue via the GitHub Issues Comments API.
+
+    Args:
+        owner: Repository owner (username or organization).
+        repo: Repository name.
+        issue_number: Issue number.
+        per_page: Number of comments per page (max 100).
+        token: GitHub API token. Uses GITHUB_TOKEN env var if not provided.
+
+    Returns:
+        List of comment dicts with user.login and body.
+    """
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    api_token = token or os.getenv("GITHUB_TOKEN", "")
+
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Repellent-AI",
+    }
+    if api_token:
+        headers["Authorization"] = f"token {api_token}"
+
+    params = {"per_page": min(per_page, 100), "page": 1}
+    all_comments = []
+
+    while True:
+        try:
+            query_params = urllib.parse.urlencode(params)
+            full_url = f"{url}?{query_params}"
+            req = urllib.request.Request(full_url, headers=headers)
+
+            with urllib.request.urlopen(req) as response:
+                if response.getcode() != 200:
+                    break
+                comments = json.loads(response.read().decode("utf-8"))
+
+            extracted = [
+                {
+                    "user": {"login": c.get("user", {}).get("login", "")},
+                    "body": c.get("body", ""),
+                }
+                for c in comments
+            ]
+            all_comments.extend(extracted)
+
+            if len(comments) < params["per_page"]:
+                break
+
+            params["page"] += 1
+
+        except urllib.error.HTTPError:
+            break
+        except urllib.error.URLError:
+            break
+        except Exception:
+            break
+
+    return all_comments
+
+
+def save_comments_to_json(comments: List[Dict], filename: str) -> None:
+    """Save comments to a JSON file."""
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(comments, f, indent=2, ensure_ascii=False)
+
+
 def get_contributors(git_repo_path: str, file_path: str) -> List[str]:
     """
     Get contributors for a file using git shortlog.

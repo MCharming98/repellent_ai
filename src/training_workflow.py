@@ -32,7 +32,7 @@ class TrainingWorkflow:
         print(f"Training Workflow: Parsed {owner}/{repo}, output: {output_path}")
         return {"owner": owner, "repo": repo, "output_path": output_path}
 
-    def fetch_issues(self, state: State):
+    def fetch_issues_metadata(self, state: State):
         print(f"Training Workflow: Fetching up to {self.max_issues} closed issues from {state['owner']}/{state['repo']}...")
         issues = get_closed_issues(
             owner=state["owner"],
@@ -44,7 +44,7 @@ class TrainingWorkflow:
         print(f"Training Workflow: Fetched {len(issues)} issues")
         return {"issues": extract_issue_fields(issues)}
 
-    def save_issues(self, state: State):
+    def save_issues_metadata(self, state: State):
         output_path = Path(state["output_path"])
         output_path.parent.mkdir(parents=True, exist_ok=True)
         save_issues_to_json(state["issues"], str(output_path))
@@ -54,13 +54,13 @@ class TrainingWorkflow:
     def build_workflow(self):
         workflow = StateGraph(self.State)
         workflow.add_node("parse_repo", self.parse_repo)
-        workflow.add_node("fetch_issues", self.fetch_issues)
-        workflow.add_node("save_issues", self.save_issues)
+        workflow.add_node("fetch_issues_metadata", self.fetch_issues_metadata)
+        workflow.add_node("save_issues_metadata", self.save_issues_metadata)
 
         workflow.add_edge(START, "parse_repo")
-        workflow.add_edge("parse_repo", "fetch_issues")
-        workflow.add_edge("fetch_issues", "save_issues")
-        workflow.add_edge("save_issues", END)
+        workflow.add_edge("parse_repo", "fetch_issues_metadata")
+        workflow.add_edge("fetch_issues_metadata", "save_issues_metadata")
+        workflow.add_edge("save_issues_metadata", END)
 
         self.workflow = workflow.compile()
 
