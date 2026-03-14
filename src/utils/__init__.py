@@ -16,7 +16,7 @@ from .git import (
     get_contributors,
     parse_github_issue_url,
     parse_github_repo_url,
-    save_comments_to_json,
+    save_issue_details_to_json,
     save_issues_to_json,
     save_issues_to_text,
 )

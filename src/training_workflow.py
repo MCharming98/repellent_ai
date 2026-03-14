@@ -11,7 +11,7 @@ from utils import (
     fetch_issue_comments,
     get_closed_issues,
     parse_github_repo_url,
-    save_comments_to_json,
+    save_issue_details_to_json,
     save_issues_to_json,
 )
 
@@ -59,7 +59,7 @@ class TrainingWorkflow:
         print(f"Training Workflow: Saved to {output_path}")
         return {}
 
-    def fetch_and_save_comments(self, state: State):
+    def fetch_and_save_issue_details(self, state: State):
         owner = state["owner"]
         repo = state["repo"]
         issues = state["issues"]
@@ -71,9 +71,11 @@ class TrainingWorkflow:
                 continue
             issue_dir = base_dir / str(issue_number)
             issue_dir.mkdir(parents=True, exist_ok=True)
+            title = issue.get("title")
+            body = issue.get("body")
             comments = fetch_issue_comments(owner, repo, issue_number)
-            comments_path = PurePath(issue_dir, "comments.json")
-            save_comments_to_json(comments, str(comments_path))
+            comments_path = PurePath(issue_dir, "issue_details.json")
+            save_issue_details_to_json(title, body, comments, str(comments_path))
             print(f"Training Workflow: [{i + 1}/{len(issues)}] Issue #{issue_number}: saved {len(comments)} comments to {comments_path}")
 
         return {}
@@ -83,13 +85,13 @@ class TrainingWorkflow:
         workflow.add_node("parse_repo", self.parse_repo)
         workflow.add_node("fetch_issues_metadata", self.fetch_issues_metadata)
         workflow.add_node("save_issues_metadata", self.save_issues_metadata)
-        workflow.add_node("fetch_and_save_comments", self.fetch_and_save_comments)
+        workflow.add_node("fetch_and_save_issue_details", self.fetch_and_save_issue_details)
 
         workflow.add_edge(START, "parse_repo")
         workflow.add_edge("parse_repo", "fetch_issues_metadata")
         workflow.add_edge("fetch_issues_metadata", "save_issues_metadata")
-        workflow.add_edge("save_issues_metadata", "fetch_and_save_comments")
-        workflow.add_edge("fetch_and_save_comments", END)
+        workflow.add_edge("save_issues_metadata", "fetch_and_save_issue_details")
+        workflow.add_edge("fetch_and_save_issue_details", END)
 
         self.workflow = workflow.compile()
 

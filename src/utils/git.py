@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 GITHUB_API_BASE = "https://api.github.com"
 
-ISSUE_FIELDS = ("url", "comments_url", "events_url", "number", "title", "state")
+ISSUE_FIELDS = ("number", "title", "url", "state", "body", "comments_url", "events_url", "html_url")
 
 
 def parse_github_repo_url(url: str) -> Optional[Tuple[str, str]]:
@@ -178,10 +178,14 @@ def fetch_issue_comments(
     return all_comments
 
 
-def save_comments_to_json(comments: List[Dict], filename: str) -> None:
-    """Save comments to a JSON file."""
+def save_issue_details_to_json(title: str, body: str, comments: List[Dict], filename: str) -> None:
+    """Save issue details to a JSON file."""
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(comments, f, indent=2, ensure_ascii=False)
+        json.dump({
+            "title": title,
+            "body": body,
+            "comments": comments,
+        }, f, indent=2, ensure_ascii=False)
 
 
 def get_contributors(git_repo_path: str, file_path: str) -> List[str]:
