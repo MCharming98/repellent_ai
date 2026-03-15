@@ -9,6 +9,7 @@ from .files import (
     write_to_file,
 )
 from .git import (
+    extract_image_markdown,
     extract_issue_fields,
     fetch_issue_comments,
     format_issue,
@@ -22,6 +23,7 @@ from .git import (
 )
 
 __all__ = [
+    'extract_image_markdown',
     'extract_issue_fields',
     'fetch_issue_comments',
     'format_issue',

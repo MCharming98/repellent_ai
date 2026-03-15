@@ -84,6 +84,33 @@ def extract_issue_fields(
     return [{k: issue.get(k) for k in ISSUE_FIELDS} for issue in issues]
 
 
+# Matches both ![alt](url) and [alt](url) markdown image/link syntax
+_IMAGE_MARKDOWN_PATTERN = re.compile(
+    r"!?\[([^\]]*)\]\(([^)]+)\)"
+)
+
+
+def extract_image_markdown(text: str) -> List[Dict[str, str]]:
+    """
+    Extract image markdown fields from a markdown string.
+
+    Matches both standard image syntax ![alt](url) and link syntax [alt](url)
+    (e.g. [Image](https://github.com/user-attachments/assets/...)).
+
+    Args:
+        text: Markdown string to parse.
+
+    Returns:
+        List of dicts with "alt" and "url" keys for each match.
+    """
+    if not text:
+        return []
+    return [
+        {"alt": m.group(1), "url": m.group(2)}
+        for m in _IMAGE_MARKDOWN_PATTERN.finditer(text)
+    ]
+
+
 def parse_github_issue_url(url: str) -> Tuple[str, str, int]:
     """
     Parse a GitHub issue URL to extract owner, repo, and issue number.
