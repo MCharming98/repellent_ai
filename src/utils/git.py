@@ -90,7 +90,7 @@ _IMAGE_MARKDOWN_PATTERN = re.compile(
 )
 
 
-def extract_image_markdown(text: str) -> List[Dict[str, str]]:
+def extract_image_markdown(text: str) -> List[str]:
     """
     Extract image markdown fields from a markdown string.
 
@@ -101,14 +101,11 @@ def extract_image_markdown(text: str) -> List[Dict[str, str]]:
         text: Markdown string to parse.
 
     Returns:
-        List of dicts with "alt" and "url" keys for each match.
+        List of URL strings for each match.
     """
     if not text:
         return []
-    return [
-        {"alt": m.group(1), "url": m.group(2)}
-        for m in _IMAGE_MARKDOWN_PATTERN.finditer(text)
-    ]
+    return [m.group(2) for m in _IMAGE_MARKDOWN_PATTERN.finditer(text)]
 
 
 def parse_github_issue_url(url: str) -> Tuple[str, str, int]:
