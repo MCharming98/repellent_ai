@@ -4,9 +4,25 @@ import json
 from pathlib import Path
 
 from typing_extensions import TypedDict
+from pathlib import PurePath
 from langgraph.graph import StateGraph, START, END
-from utils import read_file, extract_image_markdown
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langchain.agents.structured_output import ToolStrategy
+from utils import read_file, extract_image_markdown, write_to_file
 
+
+ISSUE_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "description": "Issue analysis of the issue",
+    "properties": {
+        "text": {
+            "type": "string",
+            "description": "The full issue analysis in markdown format",
+        }
+    },
+    "required": ["text"],
+}
 
 class IssueAnalysisAgent:
     """Analyzes an issue using project knowledge from the agent workspace."""
@@ -20,9 +36,17 @@ class IssueAnalysisAgent:
         business_analysis: str
         contributor_analysis: str
 
-    def __init__(self, issue_details_path: str, agent_workspace: str):
+    def __init__(self, issue_details_path: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
         self.issue_details_path = Path(issue_details_path)
         self.agent_workspace = Path(agent_workspace)
+        model_kwargs = {"api_key": api_key}
+        # Default to Google Developer API instead of Vertex AI
+        if model_provider == "google_genai":
+            model_kwargs["google_api_key"] = api_key
+        self.agent = create_agent(
+            model=init_chat_model(model, model_provider=model_provider, **model_kwargs),
+            response_format=ToolStrategy(ISSUE_ANALYSIS_SCHEMA)
+        )
 
     def load_issue(self) -> State:
         """Load issue details and project knowledge into state."""
@@ -114,7 +138,22 @@ class IssueAnalysisAgent:
 
             Contributor analysis: {contributor_analysis}
         """
-        return {}
+        message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+            ] + [{"type": "image", "url": image} for image in issue_images],
+        }
+        result = self.agent.invoke(
+            {"messages": [message]}
+        )
+        return {"issue_analysis": result["structured_response"]["text"]}
+
+    def write_analysis_to_file(self, state: State):
+        print(f"Issue Analysis Agent: Writing analysis to {state['issue_details_path']}/issue_analysis.md")
+        output_path = PurePath(state["issue_details_path"], "issue_analysis.md")
+        write_to_file(str(output_path), state["issue_analysis"], 'w')
+        return {"write_status": True}
 
     def build_workflow(self):
         self.workflow = StateGraph(self.State)
@@ -123,12 +162,17 @@ class IssueAnalysisAgent:
 
         self.workflow.add_edge(START, "load_issue")
         self.workflow.add_edge("load_issue", "load_project_knowledge")
-        self.workflow.add_edge("load_project_knowledge", END)
+        self.workflow.add_edge("load_project_knowledge", "analyze_issue")
+        self.workflow.add_edge("analyze_issue", "write_analysis_to_file")
+        self.workflow.add_edge("write_analysis_to_file", END)
         self.workflow = self.workflow.compile()
 
     async def run(self):
         final_state = await self.workflow.ainvoke({
             "issue_details_path": self.issue_details_path,
             "agent_workspace": self.agent_workspace,
+            "model": self.model,
+            "model_provider": self.model_provider,
+            "api_key": self.api_key,
         })
         return final_state

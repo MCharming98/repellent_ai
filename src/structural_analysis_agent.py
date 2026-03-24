@@ -46,6 +46,7 @@ class StructuralAnalysisAgent:
         self.files = files
         self.write_directory = write_directory
         model_kwargs = {"api_key": api_key}
+        # Default to Google Developer API instead of Vertex AI
         if model_provider == "google_genai":
             model_kwargs["google_api_key"] = api_key
         self.agent = create_agent(

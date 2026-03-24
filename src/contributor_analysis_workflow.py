@@ -76,6 +76,7 @@ class ContributorAnalysisWorkflow():
             \n
             """
         model_kwargs = {"api_key": self.api_key}
+        # Default to Google Developer API instead of Vertex AI
         if self.model_provider == "google_genai":
             model_kwargs["google_api_key"] = self.api_key
         agent = create_agent(
