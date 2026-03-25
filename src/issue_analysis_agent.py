@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
@@ -28,7 +29,7 @@ class IssueAnalysisAgent:
     """Analyzes an issue using project knowledge from the agent workspace."""
 
     class State(TypedDict):
-        issue_details_path: str
+        issue_directory: str
         agent_workspace: str
         issue_details: dict
         issue_images: list[str]
@@ -38,8 +39,9 @@ class IssueAnalysisAgent:
         issue_analysis: str
         write_status: bool
 
-    def __init__(self, issue_details_path: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
-        self.issue_details_path = Path(issue_details_path)
+    def __init__(self, id: str, issue_directory: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
+        self.id = id
+        self.issue_directory = Path(issue_directory)
         self.agent_workspace = Path(agent_workspace)
         self.model = model
         self.model_provider = model_provider
@@ -55,7 +57,7 @@ class IssueAnalysisAgent:
 
     def load_issue(self, state: State) -> dict:
         """Load issue details from JSON into state."""
-        path = Path(state["issue_details_path"])
+        path = Path(state["issue_directory"], "issue_details.json")
         with open(path, "r", encoding="utf-8") as f:
             issue_details = json.load(f)
         return {"issue_details": issue_details}
@@ -77,6 +79,8 @@ class IssueAnalysisAgent:
 
     def analyze_issue(self, state: State) -> dict:
         """Analyze issue using project knowledge."""
+        print(f"Issue Analysis Agent #{self.id}: Analyzing {state['issue_directory']}")
+        start_time = time.perf_counter()
         issue_details = state["issue_details"]
         issue_images = state.get("issue_images") or []
         file_analysis = state["file_analysis"]
@@ -158,12 +162,14 @@ class IssueAnalysisAgent:
         result = self.agent.invoke(
             {"messages": [message]}
         )
+        elapsed = time.perf_counter() - start_time
+        print(f"Issue Analysis Agent #{self.id}: analysis completed in {elapsed:.2f}s")
         return {"issue_analysis": result["structured_response"]["text"]}
 
     def write_analysis_to_file(self, state: State) -> dict:
-        out_dir = Path(state["issue_details_path"]).parent
+        out_dir = Path(state["issue_directory"]).parent
         output_path = out_dir / "issue_analysis.md"
-        print(f"Issue Analysis Agent: Writing analysis to {output_path}")
+        print(f"Issue Analysis Agent #{self.id}: Writing analysis to {output_path}")
         write_to_file(str(output_path), state["issue_analysis"], "w")
         return {"write_status": True}
 
@@ -185,7 +191,7 @@ class IssueAnalysisAgent:
 
     async def run(self):
         final_state = await self.workflow.ainvoke({
-            "issue_details_path": str(self.issue_details_path),
+            "issue_directory": str(self.issue_directory),
             "agent_workspace": str(self.agent_workspace),
         })
         return final_state
@@ -220,7 +226,8 @@ def main():
     args = parser.parse_args()
 
     agent = IssueAnalysisAgent(
-        issue_details_path=args.issue_details,
+        id='0',
+        issue_directory=args.issue_details,
         agent_workspace=args.workspace,
         model=args.model_name,
         model_provider=args.model_provider,
