@@ -84,18 +84,17 @@ def extract_issue_fields(
     return [{k: issue.get(k) for k in ISSUE_FIELDS} for issue in issues]
 
 
-# Matches both ![alt](url) and [alt](url) markdown image/link syntax
+# Matches ![Image](url) and [Image](url) only
 _IMAGE_MARKDOWN_PATTERN = re.compile(
-    r"!?\[([^\]]*)\]\(([^)]+)\)"
+    r"!?\[Image\]\(([^)]+)\)"
 )
 
 
 def extract_image_markdown(text: str) -> List[str]:
     """
-    Extract image markdown fields from a markdown string.
+    Extract image URLs from markdown where the link text is exactly "Image".
 
-    Matches both standard image syntax ![alt](url) and link syntax [alt](url)
-    (e.g. [Image](https://github.com/user-attachments/assets/...)).
+    Matches ![Image](url) and [Image](url) (e.g. GitHub user-attachments).
 
     Args:
         text: Markdown string to parse.
@@ -105,7 +104,7 @@ def extract_image_markdown(text: str) -> List[str]:
     """
     if not text:
         return []
-    return [m.group(2) for m in _IMAGE_MARKDOWN_PATTERN.finditer(text)]
+    return [m.group(1) for m in _IMAGE_MARKDOWN_PATTERN.finditer(text)]
 
 
 def parse_github_issue_url(url: str) -> Tuple[str, str, int]:

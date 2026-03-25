@@ -1,15 +1,15 @@
 """Agent for analyzing GitHub issues using project knowledge from agent workspace."""
 
+import argparse
+import asyncio
 import json
 from pathlib import Path
-
 from typing_extensions import TypedDict
-from pathlib import PurePath
 from langgraph.graph import StateGraph, START, END
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain.agents.structured_output import ToolStrategy
-from utils import read_file, extract_image_markdown, write_to_file
+from utils import read_file, extract_image_markdown, fetch_image_as_data_url, write_to_file
 
 
 ISSUE_ANALYSIS_SCHEMA = {
@@ -35,10 +35,15 @@ class IssueAnalysisAgent:
         file_analysis: str
         business_analysis: str
         contributor_analysis: str
+        issue_analysis: str
+        write_status: bool
 
     def __init__(self, issue_details_path: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
         self.issue_details_path = Path(issue_details_path)
         self.agent_workspace = Path(agent_workspace)
+        self.model = model
+        self.model_provider = model_provider
+        self.api_key = api_key
         model_kwargs = {"api_key": api_key}
         # Default to Google Developer API instead of Vertex AI
         if model_provider == "google_genai":
@@ -48,32 +53,35 @@ class IssueAnalysisAgent:
             response_format=ToolStrategy(ISSUE_ANALYSIS_SCHEMA)
         )
 
-    def load_issue(self) -> State:
-        """Load issue details and project knowledge into state."""
-        with open(self.issue_details_path, "r", encoding="utf-8") as f:
+    def load_issue(self, state: State) -> dict:
+        """Load issue details from JSON into state."""
+        path = Path(state["issue_details_path"])
+        with open(path, "r", encoding="utf-8") as f:
             issue_details = json.load(f)
         return {"issue_details": issue_details}
 
-    def load_issue_images(self) -> State:
-        """Load issue attachments from issue details."""
-        issue_details = self.state["issue_details"]
-        images = extract_image_markdown(issue_details["body"])
+    def load_issue_images(self, state: State) -> dict:
+        """Load image URLs from issue body into state."""
+        issue_details = state["issue_details"]
+        body = issue_details.get("body") or ""
+        images = extract_image_markdown(body)
         return {"issue_images": images}
 
-    def load_project_knowledge(self) -> dict:
+    def load_project_knowledge(self, state: State) -> dict:
         """Load project knowledge from agent workspace (file_analysis, business_analysis, contributor_analysis)."""
-        file_analysis = read_file(str(self.agent_workspace / "file_analysis.md"))
-        business_analysis = read_file(str(self.agent_workspace / "business_analysis.md"))
-        contributor_analysis = read_file(str(self.agent_workspace / "contributor_analysis.md"))
+        workspace = Path(state["agent_workspace"])
+        file_analysis = read_file(str(workspace / "file_analysis.md"))
+        business_analysis = read_file(str(workspace / "business_analysis.md"))
+        contributor_analysis = read_file(str(workspace / "contributor_analysis.md"))
         return {"file_analysis": file_analysis, "business_analysis": business_analysis, "contributor_analysis": contributor_analysis}
 
-    def analyze_issue(self) -> State:
+    def analyze_issue(self, state: State) -> dict:
         """Analyze issue using project knowledge."""
-        issue_details = self.state["issue_details"]
-        issue_images = self.state["issue_images"]
-        file_analysis = self.state["file_analysis"]
-        business_analysis = self.state["business_analysis"]
-        contributor_analysis = self.state["contributor_analysis"]
+        issue_details = state["issue_details"]
+        issue_images = state.get("issue_images") or []
+        file_analysis = state["file_analysis"]
+        business_analysis = state["business_analysis"]
+        contributor_analysis = state["contributor_analysis"]
         prompt = f"""
             You are an experienced software engineer who is talented in bug triageing. 
             Read the following issue report, combining the title, description, 
@@ -138,30 +146,38 @@ class IssueAnalysisAgent:
 
             Contributor analysis: {contributor_analysis}
         """
+        image_blocks = []
+        for image_url in issue_images:
+            data_url = fetch_image_as_data_url(image_url)
+            if data_url:
+                image_blocks.append({"type": "image_url", "image_url": {"url": data_url}})
         message = {
             "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-            ] + [{"type": "image", "url": image} for image in issue_images],
+            "content": [{"type": "text", "text": prompt}, *image_blocks],
         }
         result = self.agent.invoke(
             {"messages": [message]}
         )
         return {"issue_analysis": result["structured_response"]["text"]}
 
-    def write_analysis_to_file(self, state: State):
-        print(f"Issue Analysis Agent: Writing analysis to {state['issue_details_path']}/issue_analysis.md")
-        output_path = PurePath(state["issue_details_path"], "issue_analysis.md")
-        write_to_file(str(output_path), state["issue_analysis"], 'w')
+    def write_analysis_to_file(self, state: State) -> dict:
+        out_dir = Path(state["issue_details_path"]).parent
+        output_path = out_dir / "issue_analysis.md"
+        print(f"Issue Analysis Agent: Writing analysis to {output_path}")
+        write_to_file(str(output_path), state["issue_analysis"], "w")
         return {"write_status": True}
 
     def build_workflow(self):
         self.workflow = StateGraph(self.State)
         self.workflow.add_node("load_issue", self.load_issue)
+        self.workflow.add_node("load_issue_images", self.load_issue_images)
         self.workflow.add_node("load_project_knowledge", self.load_project_knowledge)
+        self.workflow.add_node("analyze_issue", self.analyze_issue)
+        self.workflow.add_node("write_analysis_to_file", self.write_analysis_to_file)
 
         self.workflow.add_edge(START, "load_issue")
-        self.workflow.add_edge("load_issue", "load_project_knowledge")
+        self.workflow.add_edge("load_issue", "load_issue_images")
+        self.workflow.add_edge("load_issue_images", "load_project_knowledge")
         self.workflow.add_edge("load_project_knowledge", "analyze_issue")
         self.workflow.add_edge("analyze_issue", "write_analysis_to_file")
         self.workflow.add_edge("write_analysis_to_file", END)
@@ -169,10 +185,50 @@ class IssueAnalysisAgent:
 
     async def run(self):
         final_state = await self.workflow.ainvoke({
-            "issue_details_path": self.issue_details_path,
-            "agent_workspace": self.agent_workspace,
-            "model": self.model,
-            "model_provider": self.model_provider,
-            "api_key": self.api_key,
+            "issue_details_path": str(self.issue_details_path),
+            "agent_workspace": str(self.agent_workspace),
         })
         return final_state
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Analyze a GitHub issue using project knowledge from an agent workspace"
+    )
+    parser.add_argument(
+        "--issue-details",
+        required=True,
+        dest="issue_details",
+        help="Path to issue_details.json",
+    )
+    parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Agent workspace directory (file_analysis.md, business_analysis.md, contributor_analysis.md)",
+    )
+    parser.add_argument(
+        "--model_name",
+        default="gemini-3-flash-preview",
+        help="LLM model (default: gemini-3-flash-preview)",
+    )
+    parser.add_argument(
+        "--model_provider",
+        default="google_genai",
+        help="LLM provider (default: google_genai)",
+    )
+    parser.add_argument("--api-key", required=True, help="API key for the LLM provider")
+    args = parser.parse_args()
+
+    agent = IssueAnalysisAgent(
+        issue_details_path=args.issue_details,
+        agent_workspace=args.workspace,
+        model=args.model_name,
+        model_provider=args.model_provider,
+        api_key=args.api_key,
+    )
+    agent.build_workflow()
+    asyncio.run(agent.run())
+
+
+if __name__ == "__main__":
+    main()

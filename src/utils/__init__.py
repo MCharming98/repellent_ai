@@ -1,6 +1,7 @@
 """Utility functions for file, directory, and git operations."""
 
 from .files import (
+    fetch_image_as_data_url,
     get_current_working_directory,
     list_files,
     list_source_files_recursive,
@@ -24,6 +25,7 @@ from .git import (
 
 __all__ = [
     'extract_image_markdown',
+    'fetch_image_as_data_url',
     'extract_issue_fields',
     'fetch_issue_comments',
     'format_issue',
