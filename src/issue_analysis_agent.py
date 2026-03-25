@@ -167,8 +167,7 @@ class IssueAnalysisAgent:
         return {"issue_analysis": result["structured_response"]["text"]}
 
     def write_analysis_to_file(self, state: State) -> dict:
-        out_dir = Path(state["issue_directory"]).parent
-        output_path = out_dir / "issue_analysis.md"
+        output_path = Path(state["issue_directory"]) / "issue_analysis.md"
         print(f"Issue Analysis Agent #{self.id}: Writing analysis to {output_path}")
         write_to_file(str(output_path), state["issue_analysis"], "w")
         return {"write_status": True}

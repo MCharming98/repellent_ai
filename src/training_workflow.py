@@ -1,10 +1,13 @@
 """Workflow to fetch closed issues from a GitHub repo for training data."""
 
 import argparse
+import asyncio
 from pathlib import Path, PurePath
 from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
+
+from issue_analysis_agent import IssueAnalysisAgent
 
 from utils import (
     extract_issue_fields,
@@ -19,10 +22,23 @@ from utils import (
 class TrainingWorkflow:
     """Fetches closed issues from a GitHub repo and stores them to issues/{repo_name}/issues.json."""
 
-    def __init__(self, github_url: str, output_dir: str = "issues", max_issues: int = 100):
+    def __init__(
+        self,
+        github_url: str,
+        output_dir: str = "issues",
+        max_issues: int = 100,
+        agent_workspace: str | None = None,
+        model: str = "gemini-3-flash-preview",
+        model_provider: str = "google_genai",
+        api_key: str | None = None,
+    ):
         self.github_url = github_url
         self.output_dir = output_dir
         self.max_issues = max_issues
+        self.agent_workspace = agent_workspace
+        self.model = model
+        self.model_provider = model_provider
+        self.api_key = api_key
 
     class State(TypedDict):
         github_url: str
@@ -80,18 +96,64 @@ class TrainingWorkflow:
 
         return {}
 
+    def run_issue_analysis_agents(self, state: State):
+        if not self.agent_workspace or not self.api_key:
+            print("Training Workflow: Skipping issue analysis (no --workspace or --api-key)")
+            return {}
+
+        repo = state["repo"]
+        base_dir = Path(self.output_dir) / repo
+        if not base_dir.is_dir():
+            return {}
+
+        issue_dirs = sorted(
+            d
+            for d in base_dir.iterdir()
+            if d.is_dir() and (d / "issue_details.json").is_file()
+        )
+        if not issue_dirs:
+            print("Training Workflow: No issue folders with issue_details.json; skipping issue analysis")
+            return {}
+
+        print(
+            f"Training Workflow: Running {len(issue_dirs)} issue analysis agents in parallel "
+            f"(workspace={self.agent_workspace})..."
+        )
+
+        agents: list[IssueAnalysisAgent] = []
+        for i, issue_dir in enumerate(issue_dirs):
+            agent = IssueAnalysisAgent(
+                str(i),
+                str(issue_dir.resolve()),
+                str(Path(self.agent_workspace).resolve()),
+                self.model,
+                self.model_provider,
+                self.api_key,
+            )
+            agent.build_workflow()
+            agents.append(agent)
+
+        async def _run_all():
+            await asyncio.gather(*[a.run() for a in agents])
+
+        asyncio.run(_run_all())
+        print("Training Workflow: Issue analysis agents finished")
+        return {}
+
     def build_workflow(self):
         workflow = StateGraph(self.State)
         workflow.add_node("parse_repo", self.parse_repo)
         workflow.add_node("fetch_issues_metadata", self.fetch_issues_metadata)
         workflow.add_node("save_issues_metadata", self.save_issues_metadata)
         workflow.add_node("fetch_and_save_issue_details", self.fetch_and_save_issue_details)
+        workflow.add_node("run_issue_analysis_agents", self.run_issue_analysis_agents)
 
         workflow.add_edge(START, "parse_repo")
         workflow.add_edge("parse_repo", "fetch_issues_metadata")
         workflow.add_edge("fetch_issues_metadata", "save_issues_metadata")
         workflow.add_edge("save_issues_metadata", "fetch_and_save_issue_details")
-        workflow.add_edge("fetch_and_save_issue_details", END)
+        workflow.add_edge("fetch_and_save_issue_details", "run_issue_analysis_agents")
+        workflow.add_edge("run_issue_analysis_agents", END)
 
         self.workflow = workflow.compile()
 
@@ -121,12 +183,39 @@ def main():
         default=100,
         help="Maximum number of issues to fetch (default: 100)",
     )
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Agent workspace with analysis markdown; if set with --api-key, runs issue analysis per issue after fetch",
+    )
+    parser.add_argument(
+        "--model-name",
+        default="gemini-3-flash-preview",
+        help="LLM model for issue analysis (default: gemini-3-flash-preview)",
+    )
+    parser.add_argument(
+        "--model-provider",
+        default="google_genai",
+        help="LLM provider for issue analysis (default: google_genai)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="API key for issue analysis (required when --workspace is set)",
+    )
     args = parser.parse_args()
+
+    if args.workspace and not args.api_key:
+        parser.error("--api-key is required when --workspace is set")
 
     workflow = TrainingWorkflow(
         github_url=args.github_url,
         output_dir=args.output_dir,
         max_issues=args.max_issues,
+        agent_workspace=args.workspace,
+        model=args.model_name,
+        model_provider=args.model_provider,
+        api_key=args.api_key,
     )
     workflow.run()
 
