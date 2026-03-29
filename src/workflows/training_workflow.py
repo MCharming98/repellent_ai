@@ -1,14 +1,18 @@
 """Workflow to fetch closed issues from a GitHub repo for training data."""
 
+import sys
+from pathlib import Path, PurePath
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import asyncio
-from pathlib import Path, PurePath
 from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
 
-from issue_investigator import IssueInvestigator
-
+from agents.issue_investigator import IssueInvestigator
 from utils import (
     extract_issue_fields,
     fetch_issue_comments,

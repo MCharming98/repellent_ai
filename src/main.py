@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from onboarding_workflow import OnboardingWorkflow
+from workflows.onboarding_workflow import OnboardingWorkflow
 
 
 def main():

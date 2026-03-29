@@ -1,10 +1,15 @@
 """Agent for analyzing GitHub issues using project knowledge from agent workspace."""
 
+import sys
+from pathlib import Path
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import asyncio
 import json
 import time
-from pathlib import Path
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langchain.agents import create_agent

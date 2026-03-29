@@ -2,8 +2,8 @@ import threading
 import time
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
+from agents.file_analyzer import FileAnalyzer
 from utils import *
-from file_analyzer import FileAnalyzer
 import asyncio
 
 class StructuralAnalysisWorkflow():

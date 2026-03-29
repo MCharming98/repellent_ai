@@ -3,9 +3,10 @@ from langgraph.graph import StateGraph, START, END
 import asyncio
 
 from utils import *
-from business_analysis_workflow import BusinessAnalysisWorkflow
-from structural_analysis_workflow import StructuralAnalysisWorkflow
-from contributor_analysis_workflow import ContributorAnalysisWorkflow
+
+from .business_analysis_workflow import BusinessAnalysisWorkflow
+from .contributor_analysis_workflow import ContributorAnalysisWorkflow
+from .structural_analysis_workflow import StructuralAnalysisWorkflow
 
 class OnboardingWorkflow():
     def __init__(self, source_repository: str, agent_workspace: str, structural_analysis_batch_size: int, model: str, model_provider: str, api_key: str):

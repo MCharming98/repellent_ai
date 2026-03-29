@@ -29,21 +29,21 @@ The onboarding pipeline runs three workflows in sequence:
 
 ### Workflows
 
-- **Onboarding Workflow** (`onboarding_workflow.py`)  
+- **Onboarding Workflow** (`workflows/onboarding_workflow.py`)  
   Orchestrates the full onboarding pipeline: structural analysis, business analysis, and contributor analysis. Outputs are written to the agent workspace.
 
-- **Structural Analysis Workflow** (`structural_analysis_workflow.py`)  
+- **Structural Analysis Workflow** (`workflows/structural_analysis_workflow.py`)  
   Recursively discovers source files, creates parallel analysis agents, and produces a per-file analysis including responsibilities, contributors, and functions. Output: `file_analysis.md`.
 
-- **Business Analysis Workflow** (`business_analysis_workflow.py`)  
+- **Business Analysis Workflow** (`workflows/business_analysis_workflow.py`)  
   Reads the structural analysis and generates a business and Critical User Journey (CUJ) overview: product summary, audience, use cases, features, and CUJ stages with linked source files. Output: `business_analysis.md`.
 
-- **Contributor Analysis Workflow** (`contributor_analysis_workflow.py`)  
+- **Contributor Analysis Workflow** (`workflows/contributor_analysis_workflow.py`)  
   Gathers contributor data per file and produces an analysis of all contributors: names, accounts, commit counts, and contribution summaries. Output: `contributor_analysis.md`.
 
 ### Agents
 
-- **File Analyzer** (`file_analyzer.py`)  
+- **File Analyzer** (`agents/file_analyzer.py`)  
   LLM agent that inspects a batch of source files and produces structured summaries (file-level responsibilities, contributors, and functions). Multiple agents run in parallel to analyze the project.
 
 ### Supporting Modules
