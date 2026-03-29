@@ -17,12 +17,88 @@ ISSUE_ANALYSIS_SCHEMA = {
     "type": "object",
     "description": "Issue analysis of the issue",
     "properties": {
-        "text": {
-            "type": "string",
-            "description": "The full issue analysis in markdown format",
-        }
+        "symptom_observed": {
+            "type": "object",
+            "properties": {
+                "analysis": {
+                    "type": "string",
+                    "description": "The analysis of the symptom of the issue",
+                },
+                "confidence_score": {
+                    "type": "number",
+                    "description": "The confidence score of the symptom",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+            },
+            "required": ["analysis", "confidence_score"],
+        },
+        "divergence_point": {
+            "type": "object",
+            "description": "The divergence point between the expected and the actual behavior/CUJ in one sentence",
+            "properties": {
+                "analysis": {
+                    "type": "string",
+                    "description": "The analysis of the expected behavior/CUJ and the divergence point between the expected and the actual behavior/CUJ",
+                },
+                "confidence_score": {
+                    "type": "number",
+                    "description": "The confidence score of the divergence point",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+            },
+            "required": ["analysis", "confidence_score"],
+        },
+        "issue_type": {
+            "type": "object",
+            "properties": {
+                "analysis": {
+                    "type": "string",
+                    "description": "The analysis and rationale of the issue type: e.g. bug, expected behavior, UX issue, or a feature request",
+                },
+                "confidence_score": {
+                    "type": "number",
+                    "description": "The confidence score of the issue type",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+            },
+            "required": ["analysis", "confidence_score"],
+        },
+        "diagnose_hypothesis": {
+            "type": "object",
+            "properties": {
+                "type": "array",
+                "description": "The list of diagnose hypothesis and recommended actions for the issue",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "hypothesis": {
+                            "type": "string",
+                            "description": "The diagnose hypothesis",
+                        },
+                        "investigation_actions": {
+                            "type": "array",
+                            "description": "The list of actions to further investigate into the diagnose hypothesis",
+                            "items": {
+                                "type": "string",
+                                "description": "The detailed recommend action",
+                            },
+                        },
+                        "confidence_score": {
+                            "type": "number",
+                            "description": "The confidence score of the diagnose hypothesis",
+                            "minimum": 0,
+                            "maximum": 100,
+                        },
+                    },
+                    "required": ["hypothesis", "investigation_actions", "confidence_score"],
+                },
+            },
+        },
     },
-    "required": ["text"],
+    "required": ["symptom_observed", "divergence_point", "issue_type", "diagnose_hypothesis"],
 }
 
 class IssueAnalysisAgent:
@@ -91,53 +167,40 @@ class IssueAnalysisAgent:
             Read the following issue report, combining the title, description, 
             and attachments, provide an analysis report with the following 6 sections:
             1. Symptom Observed
-                - In the section body, explain the symptom of the issue in one sentence.
-            2. CUJ and Divergence Point
-                - In the section body:
-                    - List the CUJ the user went through.
-                    - Exaplain the divergence point between the expected and the actual CUJ in one sentence.
-                    - Assign the CUJ and divergence point a confidence score for each.
-                    - Enclose each body in the <details> tag.
-                    - Bold “CUJ” and “Divergence Point” in the <summary> tag as title
+                - In technical terms, explain the observed symptom of the issue in one sentence.
+                - Assign your symptom analysis a confidence score.
+            2. Behavior Divergence Point
+                - List the expected behavior or CUJ the user was supposed to go through.
+                - Explain the divergence point between the expected and the actual behavior in one sentence.
+                - Assign your divergence point analysis a confidence score.
             3. Issue Type
-                - Hypothsize the type of the issue: a bug, expected behavior, UX issue, or a feature request.
-                - In the section body:
-                    - Assign your hypothesis a confidence score
-                    - Explain your rationale in one sentence.
-                    - Enclose the rationale in the <details> tag.
-            4. Diagnose Hypothesis
-                - Hypothesize 3 diagnoses with the highest confidence score of what is directly causing the issue.
-                - In the section body:
-                    - Explain each hypothesis in one sentence.
-                    - Assign each hypothesis a confidence score.
-                    - If the diagnose points to source code, provide the file name and the. function/class name, if applicable, by referring to the structural analysis.
-                    - Enclose each body in the <details> tag
-                    - Put the hypothesis and confidence score in the <summary> tag as title
-                        - Format: Hypothesis 1/2/3: [your hypothesis] (Confidence [your confidence %])
-            5. Recommened Actions
-                - Hypothesize 3 recommended actions with the highest confidence score to further investigate into the issue.
-                - If missing important information to produce confident diagnose hypothesis, you can recommend the engineer to ask issue reporter to provide the missing information.
-                - In the section body:
-                    - State each recommended action in one sentence
-                    - Assign each recommended action a confidence score.
-                    - If suggesting checking any source code logic, provide the file name and the function/class name, if applicable, by referring to the structural analysis.
-                    - Enclose each body in the <details> tag.
-                    - Put the action and the confidence score in the <summary> as the title.
-                        - Format: Action 1/2/3: [your recommendation] (Confidence [your confidence %])
-            6. Suggested Engineers
-                - Select 3 suggested engineers with the highest confidence score to further triage this issue.
-                - In the section body:
-                    - State your rationale in one sentence
-                    - Assign each engineer suggestion action a confidence score.
-                    - Enclose each body in the <details> tag.
-                    - Put the engineer’s name and the confidence score in the <summary> as the title.
-                        - Format: Engineer 1/2/3: [engineer’s name] (Confidence [your confidence %])
+                - Hypothesize the type of the issue: a bug, expected behavior, UX issue, or a feature request.
+                - Explain your rationale in one sentence.
+                - Assign your issue type analysis a confidence score.
+            4. Diagnose Hypothesis and Investigation Actions
+                - List up to 5 hypotheses that are mutually distinct in root cause, not variations of the same issue.
+                - For each hypothesis, provide the following:
+                    1. Mechanism analysis:
+                        - A step-by-step causal chain explaining how the system transitions from a correct state to the observed failure.
+                        - Reference specific components (functions, services, data flow).
+                        - If the diagnose points to source code, provide the file name and the function/class name, if applicable, by referring to the structural analysis.
+                    2. Observable implications analysis:
+                        - What logs, metrics, or behaviors must be true if this hypothesis is correct?
+                    3. Investigation actions:
+                        - Provide 5 concrete actions that would confirm or falsify this hypothesis.
+                        - Sample actions include but are not limited to: code inspection, log query, unit test, web search, ask user, etc.
+                    4. Confidence score:
+                        - Based on completeness of mechanism, testability, and clear actionable steps (not intuition).
+                - Constraints:
+                    - Do NOT output vague causes (e.g., "race condition", "bug in logic")
+                    without explaining the exact mechanism.
+                    - Prefer hypotheses that can be tested quickly.
+                    - Each hypothesis must be falsifiable.
 
             Rules and Guidelines:
             - Your language should be techinical-oriented, so engineers can quickly understand and investigate.
             - Your analysis should be concise and straight to the point.
             - Refer to the provided domain knowledge documents for domain knowledge.
-            - If provided, refer to the lessons learned document when generating analyis to avoid making known mistakes in your analysis.
 
             Issue Title: {issue_details["title"]}
 
@@ -147,8 +210,6 @@ class IssueAnalysisAgent:
             File analysis: {file_analysis}
 
             Business analysis: {business_analysis}
-
-            Contributor analysis: {contributor_analysis}
         """
         image_blocks = []
         for image_url in issue_images:
