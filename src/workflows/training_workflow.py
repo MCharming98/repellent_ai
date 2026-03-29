@@ -12,7 +12,7 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
 
-from agents.issue_investigator import IssueInvestigator
+from agents.hypothesis_generator import HypothesisGenerator
 from utils import (
     extract_issue_fields,
     fetch_issue_comments,
@@ -124,9 +124,9 @@ class TrainingWorkflow:
             f"(workspace={self.agent_workspace})..."
         )
 
-        agents: list[IssueInvestigator] = []
+        agents: list[HypothesisGenerator] = []
         for i, issue_dir in enumerate(issue_dirs):
-            agent = IssueInvestigator(
+            agent = HypothesisGenerator(
                 str(i),
                 str(issue_dir.resolve()),
                 str(Path(self.agent_workspace).resolve()),

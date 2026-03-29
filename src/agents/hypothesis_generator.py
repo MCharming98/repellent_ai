@@ -1,4 +1,4 @@
-"""Agent for analyzing GitHub issues using project knowledge from agent workspace."""
+"""Generates structured issue analysis and hypotheses using project knowledge from the agent workspace."""
 
 import sys
 from pathlib import Path
@@ -141,8 +141,8 @@ ISSUE_ANALYSIS_SCHEMA = {
     "required": ["symptom_observed", "divergence_point", "issue_type", "diagnose_hypothesis"],
 }
 
-class IssueInvestigator:
-    """Analyzes an issue using project knowledge from the agent workspace."""
+class HypothesisGenerator:
+    """Triages an issue and emits hypotheses with investigation actions using workspace knowledge."""
 
     class State(TypedDict):
         issue_directory: str
@@ -196,7 +196,7 @@ class IssueInvestigator:
 
     def analyze_issue(self, state: State) -> dict:
         """Analyze issue using project knowledge."""
-        print(f"Issue Investigator #{self.id}: Analyzing {state['issue_directory']}")
+        print(f"Hypothesis generator #{self.id}: Analyzing {state['issue_directory']}")
         start_time = time.perf_counter()
         issue_details = state["issue_details"]
         issue_images = state.get("issue_images") or []
@@ -265,18 +265,18 @@ class IssueInvestigator:
             {"messages": [message]}
         )
         elapsed = time.perf_counter() - start_time
-        print(f"Issue Investigator #{self.id}: analysis completed in {elapsed:.2f}s")
+        print(f"Hypothesis generator #{self.id}: analysis completed in {elapsed:.2f}s")
         sr = result.get("structured_response")
         if not isinstance(sr, dict):
             raise ValueError(
-                f"Issue Investigator #{self.id}: expected structured_response dict, got {type(sr)}"
+                f"Hypothesis generator #{self.id}: expected structured_response dict, got {type(sr)}"
             )
         if "symptom_observed" not in sr and "text" in sr:
             try:
                 sr = json.loads(sr["text"])
             except (json.JSONDecodeError, TypeError) as e:
                 raise ValueError(
-                    f"Issue Investigator #{self.id}: could not parse structured_response: {e}"
+                    f"Hypothesis generator #{self.id}: could not parse structured_response: {e}"
                 ) from e
         return {"issue_analysis_json": sr}
 
@@ -344,7 +344,7 @@ def main():
     parser.add_argument("--api-key", required=True, help="API key for the LLM provider")
     args = parser.parse_args()
 
-    agent = IssueInvestigator(
+    agent = HypothesisGenerator(
         id='0',
         issue_directory=args.issue_details,
         agent_workspace=args.workspace,
