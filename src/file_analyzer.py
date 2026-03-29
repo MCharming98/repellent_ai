@@ -39,7 +39,7 @@ FILE_ANALYSIS_SCHEMA = {
     "required": ["files"]
 }
 
-class StructuralAnalysisAgent:
+class FileAnalyzer:
     def __init__(self, id: str, read_directory: str, files: List[str], write_directory: str, model: str, model_provider: str, api_key: str):
         self.id = id
         self.read_directory = read_directory
@@ -63,7 +63,7 @@ class StructuralAnalysisAgent:
 
     def analyze_files(self, state: State):
         start_time = time.perf_counter()
-        print(f"Structural analysis agent #{self.id}: analyzing {len(state['source_code_files'])} files")
+        print(f"File analyzer #{self.id}: analyzing {len(state['source_code_files'])} files")
         file_analysis = {}
         source_files = state['source_code_files']
         batch_size = len(source_files)
@@ -112,11 +112,11 @@ class StructuralAnalysisAgent:
                 file_analysis_content = file.get("file_analysis", "")
                 file_analysis[file_path] = file_contributors + "\n" + file_analysis_content
         elapsed = time.perf_counter() - start_time
-        print(f"\nStructural analysis agent #{self.id}: completed in {elapsed:.2f}s")
+        print(f"\nFile analyzer #{self.id}: completed in {elapsed:.2f}s")
         return {"file_analysis": file_analysis}
 
     def write_analysis_to_file(self, state: State):
-        print(f"Structural analysis agent #{self.id}: writing {len(state['file_analysis'])} file analysis to {state['write_directory']}")
+        print(f"File analyzer #{self.id}: writing {len(state['file_analysis'])} file analysis to {state['write_directory']}")
         write_directory = state['write_directory']
         file_analysis = state['file_analysis']
         for file_path, analysis in file_analysis.items():

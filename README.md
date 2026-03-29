@@ -43,7 +43,7 @@ The onboarding pipeline runs three workflows in sequence:
 
 ### Agents
 
-- **Structural Analysis Agent** (`structural_analysis_agent.py`)  
+- **File Analyzer** (`file_analyzer.py`)  
   LLM agent that inspects a batch of source files and produces structured summaries (file-level responsibilities, contributors, and functions). Multiple agents run in parallel to analyze the project.
 
 ### Supporting Modules

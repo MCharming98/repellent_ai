@@ -7,7 +7,7 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
 
-from issue_analysis_agent import IssueAnalysisAgent
+from issue_investigator import IssueInvestigator
 
 from utils import (
     extract_issue_fields,
@@ -120,9 +120,9 @@ class TrainingWorkflow:
             f"(workspace={self.agent_workspace})..."
         )
 
-        agents: list[IssueAnalysisAgent] = []
+        agents: list[IssueInvestigator] = []
         for i, issue_dir in enumerate(issue_dirs):
-            agent = IssueAnalysisAgent(
+            agent = IssueInvestigator(
                 str(i),
                 str(issue_dir.resolve()),
                 str(Path(self.agent_workspace).resolve()),

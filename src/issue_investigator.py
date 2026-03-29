@@ -13,6 +13,44 @@ from langchain.agents.structured_output import ToolStrategy
 from utils import read_file, extract_image_markdown, fetch_image_as_data_url, write_to_file
 
 
+def _format_issue_analysis_markdown(data: dict) -> str:
+    """Render structured issue analysis JSON as markdown."""
+    section_order = [
+        "symptom_observed",
+        "divergence_point",
+        "issue_type",
+        "diagnose_hypothesis",
+    ]
+    blocks: list[str] = []
+    for key in section_order:
+        if key not in data:
+            continue
+        val = data[key]
+        blocks.append(f"## {key}\n")
+        if key in ("symptom_observed", "divergence_point", "issue_type"):
+            if isinstance(val, dict):
+                blocks.append(str(val.get("analysis", "")).strip())
+                blocks.append("")
+                blocks.append(f"Confidence score: {val.get('confidence_score', '')}")
+        elif key == "diagnose_hypothesis" and isinstance(val, list):
+            for i, item in enumerate(val):
+                if not isinstance(item, dict):
+                    continue
+                blocks.append(f"### Hypothesis {i + 1}\n")
+                blocks.append(str(item.get("hypothesis", "")).strip())
+                blocks.append("")
+                actions = item.get("investigation_actions") or []
+                if actions:
+                    blocks.append("Investigation actions")
+                    for action in actions:
+                        blocks.append(f"- {action}")
+                    blocks.append("")
+                blocks.append(f"Confidence score: {item.get('confidence_score', '')}")
+                blocks.append("")
+        blocks.append("")
+    return "\n".join(blocks).strip() + "\n"
+
+
 ISSUE_ANALYSIS_SCHEMA = {
     "type": "object",
     "description": "Issue analysis of the issue",
@@ -67,41 +105,38 @@ ISSUE_ANALYSIS_SCHEMA = {
             "required": ["analysis", "confidence_score"],
         },
         "diagnose_hypothesis": {
-            "type": "object",
-            "properties": {
-                "type": "array",
-                "description": "The list of diagnose hypothesis and recommended actions for the issue",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "hypothesis": {
+            "type": "array",
+            "description": "The list of diagnose hypothesis and recommended actions for the issue",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "hypothesis": {
+                        "type": "string",
+                        "description": "The diagnose hypothesis",
+                    },
+                    "investigation_actions": {
+                        "type": "array",
+                        "description": "The list of actions to further investigate into the diagnose hypothesis",
+                        "items": {
                             "type": "string",
-                            "description": "The diagnose hypothesis",
-                        },
-                        "investigation_actions": {
-                            "type": "array",
-                            "description": "The list of actions to further investigate into the diagnose hypothesis",
-                            "items": {
-                                "type": "string",
-                                "description": "The detailed recommend action",
-                            },
-                        },
-                        "confidence_score": {
-                            "type": "number",
-                            "description": "The confidence score of the diagnose hypothesis",
-                            "minimum": 0,
-                            "maximum": 100,
+                            "description": "The detailed recommend action",
                         },
                     },
-                    "required": ["hypothesis", "investigation_actions", "confidence_score"],
+                    "confidence_score": {
+                        "type": "number",
+                        "description": "The confidence score of the diagnose hypothesis",
+                        "minimum": 0,
+                        "maximum": 100,
+                    },
                 },
+                "required": ["hypothesis", "investigation_actions", "confidence_score"],
             },
         },
     },
     "required": ["symptom_observed", "divergence_point", "issue_type", "diagnose_hypothesis"],
 }
 
-class IssueAnalysisAgent:
+class IssueInvestigator:
     """Analyzes an issue using project knowledge from the agent workspace."""
 
     class State(TypedDict):
@@ -112,6 +147,7 @@ class IssueAnalysisAgent:
         file_analysis: str
         business_analysis: str
         contributor_analysis: str
+        issue_analysis_json: dict
         issue_analysis: str
         write_status: bool
 
@@ -155,7 +191,7 @@ class IssueAnalysisAgent:
 
     def analyze_issue(self, state: State) -> dict:
         """Analyze issue using project knowledge."""
-        print(f"Issue Analysis Agent #{self.id}: Analyzing {state['issue_directory']}")
+        print(f"Issue Investigator #{self.id}: Analyzing {state['issue_directory']}")
         start_time = time.perf_counter()
         issue_details = state["issue_details"]
         issue_images = state.get("issue_images") or []
@@ -224,12 +260,28 @@ class IssueAnalysisAgent:
             {"messages": [message]}
         )
         elapsed = time.perf_counter() - start_time
-        print(f"Issue Analysis Agent #{self.id}: analysis completed in {elapsed:.2f}s")
-        return {"issue_analysis": result["structured_response"]["text"]}
+        print(f"Issue Investigator #{self.id}: analysis completed in {elapsed:.2f}s")
+        sr = result.get("structured_response")
+        if not isinstance(sr, dict):
+            raise ValueError(
+                f"Issue Investigator #{self.id}: expected structured_response dict, got {type(sr)}"
+            )
+        if "symptom_observed" not in sr and "text" in sr:
+            try:
+                sr = json.loads(sr["text"])
+            except (json.JSONDecodeError, TypeError) as e:
+                raise ValueError(
+                    f"Issue Investigator #{self.id}: could not parse structured_response: {e}"
+                ) from e
+        return {"issue_analysis_json": sr}
+
+    def format_issue_analysis_markdown(self, state: State) -> dict:
+        md = _format_issue_analysis_markdown(state["issue_analysis_json"])
+        return {"issue_analysis": md}
 
     def write_analysis_to_file(self, state: State) -> dict:
         output_path = Path(state["issue_directory"]) / "issue_analysis.md"
-        print(f"Issue Analysis Agent #{self.id}: Writing analysis to {output_path}")
+        print(f"Issue Investigator #{self.id}: Writing analysis to {output_path}")
         write_to_file(str(output_path), state["issue_analysis"], "w")
         return {"write_status": True}
 
@@ -239,13 +291,15 @@ class IssueAnalysisAgent:
         self.workflow.add_node("load_issue_images", self.load_issue_images)
         self.workflow.add_node("load_project_knowledge", self.load_project_knowledge)
         self.workflow.add_node("analyze_issue", self.analyze_issue)
+        self.workflow.add_node("format_issue_analysis_markdown", self.format_issue_analysis_markdown)
         self.workflow.add_node("write_analysis_to_file", self.write_analysis_to_file)
 
         self.workflow.add_edge(START, "load_issue")
         self.workflow.add_edge("load_issue", "load_issue_images")
         self.workflow.add_edge("load_issue_images", "load_project_knowledge")
         self.workflow.add_edge("load_project_knowledge", "analyze_issue")
-        self.workflow.add_edge("analyze_issue", "write_analysis_to_file")
+        self.workflow.add_edge("analyze_issue", "format_issue_analysis_markdown")
+        self.workflow.add_edge("format_issue_analysis_markdown", "write_analysis_to_file")
         self.workflow.add_edge("write_analysis_to_file", END)
         self.workflow = self.workflow.compile()
 
@@ -285,7 +339,7 @@ def main():
     parser.add_argument("--api-key", required=True, help="API key for the LLM provider")
     args = parser.parse_args()
 
-    agent = IssueAnalysisAgent(
+    agent = IssueInvestigator(
         id='0',
         issue_directory=args.issue_details,
         agent_workspace=args.workspace,

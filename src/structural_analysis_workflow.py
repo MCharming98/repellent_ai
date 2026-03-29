@@ -3,7 +3,7 @@ import time
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from utils import *
-from structural_analysis_agent import StructuralAnalysisAgent
+from file_analyzer import FileAnalyzer
 import asyncio
 
 class StructuralAnalysisWorkflow():
@@ -23,7 +23,7 @@ class StructuralAnalysisWorkflow():
         model_provider: str
         api_key: str
         source_code_files: list[str]
-        agents: list[StructuralAnalysisAgent]
+        agents: list[FileAnalyzer]
 
     # Nodes
     def list_source_code_files(self, state: State):
@@ -39,7 +39,7 @@ class StructuralAnalysisWorkflow():
             files = state['source_code_files'][i * state['file_batch_size'] : min((i + 1) * state['file_batch_size'], len(state['source_code_files']))]
             if len(files) == 0:
                 continue
-            agent = StructuralAnalysisAgent(str(id), state['read_directory'], files, state['write_directory'], state['model'], state['model_provider'], state['api_key'])
+            agent = FileAnalyzer(str(id), state['read_directory'], files, state['write_directory'], state['model'], state['model_provider'], state['api_key'])
             agents.append(agent)
             id += 1
         print(f"Structural Analysis Workflow: Created {len(agents)} agents")
