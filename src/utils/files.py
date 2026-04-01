@@ -7,7 +7,6 @@ import urllib.request
 from pathlib import Path
 from typing import List, Literal, Optional
 
-
 def get_current_working_directory() -> str:
     """
     Get the current working directory path.
@@ -132,7 +131,6 @@ def list_cwd_source_files_recursive() -> List[str]:
     """List all source code files in the current working directory recursively."""
     return list_source_files_recursive(os.getcwd())
 
-
 def read_file(path: str) -> str:
     """
     Read the contents of a file and return it as a string.
@@ -182,8 +180,6 @@ def write_to_file(path: str, content: str, mode: Literal['w', 'a'] = 'a') -> Non
 
 
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
-
-
 def _sniff_image_mime(data: bytes) -> Optional[str]:
     if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
