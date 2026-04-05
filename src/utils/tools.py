@@ -3,7 +3,7 @@ from typing import Literal
 from langchain.tools import tool
 
 @tool
-def read_file(path: str) -> str:
+def read_file_tool(path: str) -> str:
     """
     Read the contents of a file and return it as a string.
 
@@ -16,7 +16,7 @@ def read_file(path: str) -> str:
     return files.read_file(path)
 
 @tool
-def write_to_file(path: str, content: str, mode: Literal['w', 'a'] = 'a') -> str:
+def write_to_file_tool(path: str, content: str, mode: Literal['w', 'a'] = 'a') -> str:
     """
     Write content to a file. Creates parent directories if needed.
 

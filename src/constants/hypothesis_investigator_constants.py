@@ -75,8 +75,9 @@ def get_hypothesis_investigator_prompt(
     File Analysis: {file_analysis}
 
     Available Tools:
-    - Code search (using read_file)
-    - Google search
+    - read_file_tool: read source files by path
+    - write_to_file_tool: write or append to a file (use sparingly for notes or artifacts)
+    - Web search (when enabled by the model provider)
 
     ## Your Task
 
@@ -97,8 +98,8 @@ def get_hypothesis_investigator_prompt(
 
     ### 3. Execute investigations and record investigation results
     For each experiment:
-    - Decide tool use: read_file, Google search, etc
-    - Confirm action: read source code file, search on Google, etc
+    - Confirm action: read source code file, write file, search on web, etc
+    - Decide tool use: read_file_tool, write_to_file_tool, web search, etc
     - List observation: what you found
     - State interpretation: Does this support or contradict the hypothesis? Is this necessary or sufficient evidence?
 
