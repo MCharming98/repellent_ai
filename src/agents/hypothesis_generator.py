@@ -18,42 +18,41 @@ from langchain.agents.structured_output import ToolStrategy
 from utils import read_file, extract_image_markdown, fetch_image_as_data_url, write_to_file
 
 
+_SUMMARY_SECTION_KEYS = ("symptom_observed", "divergence_point", "issue_type")
+
+
 def _format_issue_analysis_markdown(data: dict) -> str:
-    """Render structured issue analysis JSON as markdown."""
-    section_order = [
-        "symptom_observed",
-        "divergence_point",
-        "issue_type",
-        "diagnose_hypothesis",
-    ]
+    """Render symptom_observed, divergence_point, and issue_type for diagnosis.md."""
     blocks: list[str] = []
-    for key in section_order:
+    for key in _SUMMARY_SECTION_KEYS:
         if key not in data:
             continue
         val = data[key]
         blocks.append(f"## {key}\n")
-        if key in ("symptom_observed", "divergence_point", "issue_type"):
-            if isinstance(val, dict):
-                blocks.append(str(val.get("analysis", "")).strip())
-                blocks.append("")
-                blocks.append(f"Confidence score: {val.get('confidence_score', '')}")
-        elif key == "diagnose_hypothesis" and isinstance(val, list):
-            for i, item in enumerate(val):
-                if not isinstance(item, dict):
-                    continue
-                blocks.append(f"### Hypothesis {i + 1}\n")
-                blocks.append(str(item.get("hypothesis", "")).strip())
-                blocks.append("")
-                actions = item.get("investigation_actions") or []
-                if actions:
-                    blocks.append("Investigation actions")
-                    for action in actions:
-                        blocks.append(f"- {action}")
-                    blocks.append("")
-                blocks.append(f"Confidence score: {item.get('confidence_score', '')}")
-                blocks.append("")
+        if isinstance(val, dict):
+            blocks.append(str(val.get("analysis", "")).strip())
+            blocks.append("")
+            blocks.append(f"Confidence score: {val.get('confidence_score', '')}")
         blocks.append("")
     return "\n".join(blocks).strip() + "\n"
+
+
+def _format_hypothesis_item_markdown(item: dict, index_one_based: int) -> str:
+    """Markdown body for a single diagnosis_hypothesis entry (hypothesis_N.md)."""
+    lines: list[str] = [
+        f"# Hypothesis {index_one_based}\n",
+        str(item.get("hypothesis", "")).strip(),
+        "",
+    ]
+    actions = item.get("investigation_actions") or []
+    if actions:
+        lines.append("Investigation actions")
+        for action in actions:
+            lines.append(f"- {action}")
+        lines.append("")
+    lines.append(f"Confidence score: {item.get('confidence_score', '')}")
+    lines.append("")
+    return "\n".join(lines).strip() + "\n"
 
 
 ISSUE_ANALYSIS_SCHEMA = {
@@ -285,9 +284,22 @@ class HypothesisGenerator:
         return {"issue_analysis": md}
 
     def write_analysis_to_file(self, state: State) -> dict:
-        output_path = Path(state["issue_directory"]) / "issue_analysis.md"
-        print(f"Issue Investigator #{self.id}: Writing analysis to {output_path}")
-        write_to_file(str(output_path), state["issue_analysis"], "w")
+        issue_dir = Path(state["issue_directory"])
+        summary_path = issue_dir / "diagnosis.md"
+        print(f"Hypothesis generator #{self.id}: Writing summary to {summary_path}")
+        write_to_file(str(summary_path), state["issue_analysis"], "w")
+
+        hypotheses = state["issue_analysis_json"].get("diagnose_hypothesis") or []
+        if isinstance(hypotheses, list):
+            for i, item in enumerate(hypotheses):
+                if not isinstance(item, dict):
+                    continue
+                n = i + 1
+                hyp_path = issue_dir / f"hypothesis_{n}.md"
+                body = _format_hypothesis_item_markdown(item, n)
+                print(f"Hypothesis generator #{self.id}: Writing hypothesis file {hyp_path.name}")
+                write_to_file(str(hyp_path), body, "w")
+
         return {"write_status": True}
 
     def build_workflow(self):

@@ -5,7 +5,7 @@ import os
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 def get_current_working_directory() -> str:
     """
@@ -158,10 +158,11 @@ def read_file(path: str) -> str:
         return f"Error: Cannot read file '{path}': {str(e)}"
 
 
-def write_to_file(path: str, content: str, mode: Literal['w', 'a'] = 'a') -> None:
+def write_to_file(path: str, content: Any, mode: Literal['w', 'a'] = 'a') -> None:
     """
-    Write content to a file. Creates parent directories if needed.
+    Write content to a file. Creates parent directories as needed.
     If mode is 'a', append; if 'w', overwrite.
+    Non-string content is coerced with str().
     """
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,10 +172,14 @@ def write_to_file(path: str, content: str, mode: Literal['w', 'a'] = 'a') -> Non
 
     try:
         with open(file_path, mode, encoding='utf-8') as f:
-            if not content is str:
-                print(f"Warning: Content is not a string but {type(content)}, converting to string")
-                content = str(content)
-            f.write(str(content))
+            if isinstance(content, str):
+                text = content
+            else:
+                print(
+                    f"Warning: Content is not a string but {type(content)}, converting to string"
+                )
+                text = str(content)
+            f.write(text)
     except IOError as e:
         raise IOError(f"Cannot write to file '{path}': {str(e)}") from e
 

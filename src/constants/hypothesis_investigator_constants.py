@@ -60,8 +60,9 @@ def get_hypothesis_investigator_prompt(
     bug_report: str,
     hypothesis: str,
     file_analysis: str,
+    diagnosis: str,
 ) -> str:
-    """Build the investigator system prompt with bug context and hypothesis."""
+    """Build the investigator system prompt with bug context, diagnosis summary, and hypothesis."""
     return f"""
     You are an investigator agent responsible for validating or falsifying a single hypothesis about a software bug.
     Your goal is NOT to explain the bug.
@@ -69,6 +70,8 @@ def get_hypothesis_investigator_prompt(
 
     ## Inputs
     Bug Report: {bug_report}
+
+    Issue Diagnosis: {diagnosis}
 
     Hypothesis: {hypothesis}
 
