@@ -175,7 +175,11 @@ class HypothesisGenerator:
         """Load issue details from JSON into state."""
         path = Path(state["issue_directory"], "issue_details.json")
         with open(path, "r", encoding="utf-8") as f:
-            issue_details = json.load(f)
+            raw_issue_details = json.load(f)
+        issue_details = {
+            "title": raw_issue_details.get("title", ""),
+            "body": raw_issue_details.get("body", ""),
+        }
         return {"issue_details": issue_details}
 
     def load_issue_images(self, state: State) -> dict:

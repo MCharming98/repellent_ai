@@ -2,15 +2,19 @@
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
+if __name__ == "__main__":
+    # Allow direct execution: python src/agents/hypothesis_investigator.py
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.messages import ToolMessage
 from langgraph.graph import END, START, StateGraph
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import TypedDict
 
 from constants.hypothesis_investigator_constants import (
     INVESTIGATION_ANALYSIS_SCHEMA,
@@ -18,7 +22,7 @@ from constants.hypothesis_investigator_constants import (
 )
 from utils import read_file, write_to_file
 from utils.langchain import get_llm_agent
-from utils.tools import read_file_tool, write_to_file_tool
+from utils.tools import list_files_tool, list_source_files_recursive_tool, read_file_tool, write_to_file_tool 
 
 # Order matches INVESTIGATION_ANALYSIS_SCHEMA required keys.
 _INVESTIGATION_MARKDOWN_KEY_ORDER = (
@@ -104,6 +108,7 @@ class HypothesisInvestigator:
         self,
         issue_path: str,
         hypothesis_path: str,
+        source_directory: str,
         agent_workspace_dir: str,
         model: str,
         model_provider: str,
@@ -111,6 +116,7 @@ class HypothesisInvestigator:
     ) -> None:
         self.issue_path = issue_path
         self.hypothesis_path = hypothesis_path
+        self.source_directory = source_directory
         self.agent_workspace_dir = agent_workspace_dir
         self.model = model
         self.model_provider = model_provider
@@ -121,7 +127,7 @@ class HypothesisInvestigator:
             model_provider,
             api_key,
             enable_web_search=True,
-            tools=[read_file_tool, write_to_file_tool],
+            tools=[list_files_tool, list_source_files_recursive_tool, read_file_tool, write_to_file_tool],
             response_format=ToolStrategy(INVESTIGATION_ANALYSIS_SCHEMA),
         )
         self.workflow = None
@@ -162,9 +168,14 @@ class HypothesisInvestigator:
         )
         print("Hypothesis investigator: running analysis agent...")
         start_time = time.perf_counter()
-        result = self.agent.invoke(
-            {"messages": [{"role": "user", "content": prompt}]}
-        )
+        prev_cwd = os.getcwd()
+        os.chdir(self.source_directory)
+        try:
+            result = self.agent.invoke(
+                {"messages": [{"role": "user", "content": prompt}]}
+            )
+        finally:
+            os.chdir(prev_cwd)
         elapsed = time.perf_counter() - start_time
         print(f"Hypothesis investigator: analysis completed in {elapsed:.2f}s")
 
@@ -209,4 +220,54 @@ class HypothesisInvestigator:
         if self.workflow is None:
             self.build_workflow()
         final_state = await self.workflow.ainvoke({})
+        # print(f"Hypothesis investigator: tool use: {final_state['tool_use']}")
         return final_state
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Investigate one hypothesis against issue context"
+    )
+    parser.add_argument(
+        "--issue-path",
+        required=True,
+        help="Path to issue directory or issue_details.json",
+    )
+    parser.add_argument(
+        "--hypothesis-path",
+        required=True,
+        help="Path to hypothesis_N.md file",
+    )
+    parser.add_argument(
+        "--source-directory",
+        required=True,
+        help="Source repository directory used as working directory during investigation",
+    )
+    parser.add_argument(
+        "--workspace",
+        required=True,
+        dest="agent_workspace_dir",
+        help="Agent workspace directory (contains file_analysis.md)",
+    )
+    parser.add_argument("--model", default="gemini-3-flash-preview")
+    parser.add_argument("--model-provider", default="google_genai")
+    parser.add_argument("--api-key", required=True)
+    args = parser.parse_args()
+
+    investigator = HypothesisInvestigator(
+        issue_path=args.issue_path,
+        hypothesis_path=args.hypothesis_path,
+        source_directory=args.source_directory,
+        agent_workspace_dir=args.agent_workspace_dir,
+        model=args.model,
+        model_provider=args.model_provider,
+        api_key=args.api_key,
+    )
+    investigator.build_workflow()
+    asyncio.run(investigator.run())
+
+
+if __name__ == "__main__":
+    main()
