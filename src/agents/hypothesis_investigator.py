@@ -12,7 +12,7 @@ if __name__ == "__main__":
     # Allow direct execution: python src/agents/hypothesis_investigator.py
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from langchain.agents.structured_output import ToolStrategy
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
@@ -75,6 +75,42 @@ def _message_content_to_str(content: Any) -> str:
     return str(content)
 
 
+def aggregate_token_usage_from_messages(messages: list[Any]) -> dict[str, int] | None:
+    """
+    Sum token counts from AIMessage.usage_metadata across agent steps (if present).
+    """
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    found = False
+    for msg in messages or []:
+        if not isinstance(msg, AIMessage):
+            continue
+        um = getattr(msg, "usage_metadata", None)
+        if not isinstance(um, dict) or not um:
+            continue
+        found = True
+        # LangChain normalizes common keys; providers may vary slightly.
+        it = um.get("input_tokens")
+        ot = um.get("output_tokens")
+        tt = um.get("total_tokens")
+        if it is not None:
+            input_tokens += int(it)
+        if ot is not None:
+            output_tokens += int(ot)
+        if tt is not None:
+            total_tokens += int(tt)
+    if not found:
+        return None
+    if total_tokens == 0 and (input_tokens or output_tokens):
+        total_tokens = input_tokens + output_tokens
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
 def extract_tool_use_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
     """
     Collect tool execution results from an agent message list (ToolMessage entries).
@@ -106,17 +142,17 @@ class HypothesisInvestigator:
 
     def __init__(
         self,
-        issue_path: str,
+        issue_dir: str,
         hypothesis_path: str,
-        source_directory: str,
+        source_dir: str,
         agent_workspace_dir: str,
         model: str,
         model_provider: str,
         api_key: str,
     ) -> None:
-        self.issue_path = issue_path
+        self.issue_dir = issue_dir
         self.hypothesis_path = hypothesis_path
-        self.source_directory = source_directory
+        self.source_dir = source_dir
         self.agent_workspace_dir = agent_workspace_dir
         self.model = model
         self.model_provider = model_provider
@@ -134,7 +170,7 @@ class HypothesisInvestigator:
 
     def load_context(self, state: State) -> dict:
         """Load issue JSON, diagnosis.md, hypothesis text, and workspace file analysis."""
-        issue_dir = Path(self.issue_path)
+        issue_dir = Path(self.issue_dir)
         if issue_dir.is_file():
             issue_dir = issue_dir.parent
         issue_details_path = issue_dir / "issue_details.json"
@@ -169,7 +205,7 @@ class HypothesisInvestigator:
         print("Hypothesis investigator: running analysis agent...")
         start_time = time.perf_counter()
         prev_cwd = os.getcwd()
-        os.chdir(self.source_directory)
+        os.chdir(self.source_dir)
         try:
             result = self.agent.invoke(
                 {"messages": [{"role": "user", "content": prompt}]}
@@ -177,7 +213,19 @@ class HypothesisInvestigator:
         finally:
             os.chdir(prev_cwd)
         elapsed = time.perf_counter() - start_time
-        print(f"Hypothesis investigator: analysis completed in {elapsed:.2f}s")
+        messages_for_usage = result.get("messages") or []
+        usage = aggregate_token_usage_from_messages(messages_for_usage)
+        if usage:
+            print(
+                "Hypothesis investigator: analysis completed in "
+                f"{elapsed:.2f}s | tokens in={usage['input_tokens']} "
+                f"out={usage['output_tokens']} total={usage['total_tokens']}"
+            )
+        else:
+            print(
+                f"Hypothesis investigator: analysis completed in {elapsed:.2f}s "
+                "(token usage not available on messages)"
+            )
 
         sr = result.get("structured_response")
         if not isinstance(sr, dict):
@@ -192,7 +240,7 @@ class HypothesisInvestigator:
                     f"Hypothesis investigator: could not parse structured_response: {e}"
                 ) from e
 
-        messages = result.get("messages") or []
+        messages = messages_for_usage
         tool_use = extract_tool_use_from_messages(messages)
 
         return {"hypothesis_analysis": sr, "tool_use": tool_use}
@@ -231,9 +279,9 @@ def main() -> None:
         description="Investigate one hypothesis against issue context"
     )
     parser.add_argument(
-        "--issue-path",
+        "--issue-dir",
         required=True,
-        help="Path to issue directory or issue_details.json",
+        help="Path to issue dir or issue_details.json",
     )
     parser.add_argument(
         "--hypothesis-path",
@@ -241,15 +289,15 @@ def main() -> None:
         help="Path to hypothesis_N.md file",
     )
     parser.add_argument(
-        "--source-directory",
+        "--source-dir",
         required=True,
-        help="Source repository directory used as working directory during investigation",
+        help="Source repository dir used as working dir during investigation",
     )
     parser.add_argument(
         "--workspace",
         required=True,
         dest="agent_workspace_dir",
-        help="Agent workspace directory (contains file_analysis.md)",
+        help="Agent workspace dir (contains file_analysis.md)",
     )
     parser.add_argument("--model", default="gemini-3-flash-preview")
     parser.add_argument("--model-provider", default="google_genai")
@@ -257,9 +305,9 @@ def main() -> None:
     args = parser.parse_args()
 
     investigator = HypothesisInvestigator(
-        issue_path=args.issue_path,
+        issue_dir=args.issue_dir,
         hypothesis_path=args.hypothesis_path,
-        source_directory=args.source_directory,
+        source_dir=args.source_dir,
         agent_workspace_dir=args.agent_workspace_dir,
         model=args.model,
         model_provider=args.model_provider,

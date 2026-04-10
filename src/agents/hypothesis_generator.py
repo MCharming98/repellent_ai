@@ -144,7 +144,7 @@ class HypothesisGenerator:
     """Triages an issue and emits hypotheses with investigation actions using workspace knowledge."""
 
     class State(TypedDict):
-        issue_directory: str
+        issue_dir: str
         agent_workspace: str
         issue_details: dict
         issue_images: list[str]
@@ -155,9 +155,9 @@ class HypothesisGenerator:
         issue_analysis: str
         write_status: bool
 
-    def __init__(self, id: str, issue_directory: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
+    def __init__(self, id: str, issue_dir: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
         self.id = id
-        self.issue_directory = Path(issue_directory)
+        self.issue_dir = Path(issue_dir)
         self.agent_workspace = Path(agent_workspace)
         self.model = model
         self.model_provider = model_provider
@@ -173,7 +173,7 @@ class HypothesisGenerator:
 
     def load_issue(self, state: State) -> dict:
         """Load issue details from JSON into state."""
-        path = Path(state["issue_directory"], "issue_details.json")
+        path = Path(state["issue_dir"], "issue_details.json")
         with open(path, "r", encoding="utf-8") as f:
             raw_issue_details = json.load(f)
         issue_details = {
@@ -199,7 +199,7 @@ class HypothesisGenerator:
 
     def analyze_issue(self, state: State) -> dict:
         """Analyze issue using project knowledge."""
-        print(f"Hypothesis generator #{self.id}: Analyzing {state['issue_directory']}")
+        print(f"Hypothesis generator #{self.id}: Analyzing {state['issue_dir']}")
         start_time = time.perf_counter()
         issue_details = state["issue_details"]
         issue_images = state.get("issue_images") or []
@@ -288,7 +288,7 @@ class HypothesisGenerator:
         return {"issue_analysis": md}
 
     def write_analysis_to_file(self, state: State) -> dict:
-        issue_dir = Path(state["issue_directory"])
+        issue_dir = Path(state["issue_dir"])
         summary_path = issue_dir / "diagnosis.md"
         print(f"Hypothesis generator #{self.id}: Writing summary to {summary_path}")
         write_to_file(str(summary_path), state["issue_analysis"], "w")
@@ -326,7 +326,7 @@ class HypothesisGenerator:
 
     async def run(self):
         final_state = await self.workflow.ainvoke({
-            "issue_directory": str(self.issue_directory),
+            "issue_dir": str(self.issue_dir),
             "agent_workspace": str(self.agent_workspace),
         })
         return final_state
@@ -345,7 +345,7 @@ def main():
     parser.add_argument(
         "--workspace",
         required=True,
-        help="Agent workspace directory (file_analysis.md, business_analysis.md, contributor_analysis.md)",
+        help="Agent workspace dir (file_analysis.md, business_analysis.md, contributor_analysis.md)",
     )
     parser.add_argument(
         "--model_name",
@@ -362,7 +362,7 @@ def main():
 
     agent = HypothesisGenerator(
         id='0',
-        issue_directory=args.issue_details,
+        issue_dir=args.issue_details,
         agent_workspace=args.workspace,
         model=args.model_name,
         model_provider=args.model_provider,

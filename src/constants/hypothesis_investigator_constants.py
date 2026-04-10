@@ -96,8 +96,10 @@ def get_hypothesis_investigator_prompt(
     Propose 1-3 high-leverage actions to validate/falsify the hypothesis.
     Each experiment must:
     - Be executable using available tools
-    - Minimize cost (time, compute)
+    - Minimize cost (time, compute, reads)
     - Maximize information gain
+
+    ### 3. Plan ac
 
     ### 3. Execute investigations and record investigation results
     For each experiment:
@@ -113,13 +115,16 @@ def get_hypothesis_investigator_prompt(
     - inconclusive(insufficient or ambiguous evidence) = 0
 
     ### 5. Next Steps
-    If there are actions that cannot be performed at this time, for example, need user input or missing required tools, list the actions here.
+    - If there are actions that cannot be performed at this time, for example, need user input or missing required tools, list the actions here.
+    - If the hypothesis is confirmed and is a bug, suggest the next steps to be taken to fix the bug.
+    - If the hypothesis is confirmed and is a feature or intended behavior, explain the reasoning behind the behavior.
 
     ## Requirements
     - Prefer falsification over confirmation (try to disprove first)
     - Execute one experiment at a time
     - Stop early if decisive evidence is found
     - Treat absence of evidence as inconclusiveness, not confirmation
+    - Only read files that are necessary to validate or falsify the hypothesis
 
     ## Heuristics
     - If a hypothesis cannot be tested, mark it as weak
