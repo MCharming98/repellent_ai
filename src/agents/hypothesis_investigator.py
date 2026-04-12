@@ -24,25 +24,19 @@ from utils import read_file, write_to_file
 from utils.langchain import get_llm_agent
 from utils.tools import list_files_tool, list_source_files_recursive_tool, read_file_tool, write_to_file_tool 
 
-# Order matches INVESTIGATION_ANALYSIS_SCHEMA required keys.
-_INVESTIGATION_MARKDOWN_KEY_ORDER = (
-    "critical_signals",
-    "investigation_actions",
-    "investigation_results",
-    "final_resolution",
-    "confidence_score",
-    "next_steps",
-)
+# Stable section order for markdown output (schema ``required`` order).
+_INVESTIGATION_MARKDOWN_KEY_ORDER = tuple(INVESTIGATION_ANALYSIS_SCHEMA["required"])
 
 def _investigation_key_to_subheading(key: str) -> str:
     return key.replace("_", " ").strip().title()
-
 
 def format_investigation_analysis_to_markdown(data: dict) -> str:
     """
     Render an INVESTIGATION_ANALYSIS_SCHEMA-shaped dict as markdown.
 
-    Each field uses a ### sub-heading; array values use one bullet per item.
+    Each field uses a ### sub-heading. Arrays (e.g. critical_signals,
+    hypothesis_resolution, next_steps) render as bullet lists; ``final_verdict``
+    renders as a paragraph.
     """
     lines: list[str] = []
     for key in _INVESTIGATION_MARKDOWN_KEY_ORDER:
@@ -135,7 +129,6 @@ class HypothesisInvestigator:
     class State(TypedDict):
         issue_details: dict
         issue_diagnosis: str
-        hypothesis_details: str
         file_analysis: str
         hypothesis_analysis: dict
         tool_use: list[dict[str, Any]]
@@ -143,7 +136,6 @@ class HypothesisInvestigator:
     def __init__(
         self,
         issue_dir: str,
-        hypothesis_path: str,
         source_dir: str,
         agent_workspace_dir: str,
         model: str,
@@ -151,7 +143,6 @@ class HypothesisInvestigator:
         api_key: str,
     ) -> None:
         self.issue_dir = issue_dir
-        self.hypothesis_path = hypothesis_path
         self.source_dir = source_dir
         self.agent_workspace_dir = agent_workspace_dir
         self.model = model
@@ -163,13 +154,13 @@ class HypothesisInvestigator:
             model_provider,
             api_key,
             enable_web_search=True,
-            tools=[list_files_tool, list_source_files_recursive_tool, read_file_tool, write_to_file_tool],
+            tools=[list_source_files_recursive_tool, read_file_tool, write_to_file_tool],
             response_format=ToolStrategy(INVESTIGATION_ANALYSIS_SCHEMA),
         )
         self.workflow = None
 
     def load_context(self, state: State) -> dict:
-        """Load issue JSON, diagnosis.md, hypothesis text, and workspace file analysis."""
+        """Load issue JSON, diagnosis.md (including hypotheses), and workspace file analysis."""
         issue_dir = Path(self.issue_dir)
         if issue_dir.is_file():
             issue_dir = issue_dir.parent
@@ -178,14 +169,12 @@ class HypothesisInvestigator:
             issue_details = json.load(f)
         diagnosis_path = issue_dir / "diagnosis.md"
         diagnosis = read_file(str(diagnosis_path))
-        hypothesis_details = read_file(self.hypothesis_path)
         file_analysis = read_file(
             str(Path(self.agent_workspace_dir) / "file_analysis.md")
         )
         return {
             "issue_details": issue_details,
             "issue_diagnosis": diagnosis,
-            "hypothesis_details": hypothesis_details,
             "file_analysis": file_analysis,
         }
 
@@ -197,10 +186,9 @@ class HypothesisInvestigator:
         bug_report = f"{title}\n\n{body}".strip()
 
         prompt = get_hypothesis_investigator_prompt(
-            bug_report,
-            state["hypothesis_details"],
-            state["file_analysis"],
-            state["issue_diagnosis"],
+            bug_report=bug_report,
+            diagnosis_and_hypotheses=state["issue_diagnosis"],
+            file_analysis=state["file_analysis"],
         )
         print("Hypothesis investigator: running analysis agent...")
         start_time = time.perf_counter()
@@ -246,11 +234,15 @@ class HypothesisInvestigator:
         return {"hypothesis_analysis": sr, "tool_use": tool_use}
 
     def append_hypothesis_analysis_to_file(self, state: State) -> dict:
-        """Append structured investigation output as markdown to ``hypothesis_path``."""
+        """Append structured investigation output as markdown to ``diagnosis.md`` in the issue dir."""
+        issue_dir = Path(self.issue_dir)
+        if issue_dir.is_file():
+            issue_dir = issue_dir.parent
+        diagnosis_path = str(issue_dir / "diagnosis.md")
         md = format_investigation_analysis_to_markdown(state["hypothesis_analysis"])
         block = "\n\n---\n\n## Investigation analysis\n\n" + md
-        write_to_file(self.hypothesis_path, block, mode="a")
-        print(f"Hypothesis investigator: appended investigation analysis to {self.hypothesis_path}")
+        write_to_file(diagnosis_path, block, mode="a")
+        print(f"Hypothesis investigator: appended investigation analysis to {diagnosis_path}")
         return {}
 
     def build_workflow(self) -> None:
@@ -284,11 +276,6 @@ def main() -> None:
         help="Path to issue dir or issue_details.json",
     )
     parser.add_argument(
-        "--hypothesis-path",
-        required=True,
-        help="Path to hypothesis_N.md file",
-    )
-    parser.add_argument(
         "--source-dir",
         required=True,
         help="Source repository dir used as working dir during investigation",
@@ -306,7 +293,6 @@ def main() -> None:
 
     investigator = HypothesisInvestigator(
         issue_dir=args.issue_dir,
-        hypothesis_path=args.hypothesis_path,
         source_dir=args.source_dir,
         agent_workspace_dir=args.agent_workspace_dir,
         model=args.model,

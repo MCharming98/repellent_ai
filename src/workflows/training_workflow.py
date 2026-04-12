@@ -125,9 +125,8 @@ class TrainingWorkflow:
         )
 
         agents: list[HypothesisGenerator] = []
-        for i, issue_dir in enumerate(issue_dirs):
+        for issue_dir in issue_dirs:
             agent = HypothesisGenerator(
-                str(i),
                 str(issue_dir.resolve()),
                 str(Path(self.agent_workspace).resolve()),
                 self.model,

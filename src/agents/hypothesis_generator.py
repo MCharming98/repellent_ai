@@ -22,7 +22,7 @@ _SUMMARY_SECTION_KEYS = ("symptom_observed", "divergence_point", "issue_type")
 
 
 def _format_issue_analysis_markdown(data: dict) -> str:
-    """Render symptom_observed, divergence_point, and issue_type for diagnosis.md."""
+    """Render full diagnosis.md: triage sections plus all diagnose hypotheses."""
     blocks: list[str] = []
     for key in _SUMMARY_SECTION_KEYS:
         if key not in data:
@@ -34,13 +34,23 @@ def _format_issue_analysis_markdown(data: dict) -> str:
             blocks.append("")
             blocks.append(f"Confidence score: {val.get('confidence_score', '')}")
         blocks.append("")
+
+    hyps = data.get("diagnose_hypothesis") or data.get("diagnosis_hypothesis") or []
+    if isinstance(hyps, list) and hyps:
+        blocks.append("## diagnose_hypothesis\n")
+        for i, item in enumerate(hyps):
+            if not isinstance(item, dict):
+                continue
+            blocks.append(_format_hypothesis_item_markdown(item, i + 1))
+            blocks.append("")
+
     return "\n".join(blocks).strip() + "\n"
 
 
 def _format_hypothesis_item_markdown(item: dict, index_one_based: int) -> str:
-    """Markdown body for a single diagnosis_hypothesis entry (hypothesis_N.md)."""
+    """Markdown for one hypothesis (subsection under diagnose_hypothesis)."""
     lines: list[str] = [
-        f"# Hypothesis {index_one_based}\n",
+        f"### Hypothesis {index_one_based}\n",
         str(item.get("hypothesis", "")).strip(),
         "",
     ]
@@ -155,8 +165,7 @@ class HypothesisGenerator:
         issue_analysis: str
         write_status: bool
 
-    def __init__(self, id: str, issue_dir: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
-        self.id = id
+    def __init__(self, issue_dir: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
         self.issue_dir = Path(issue_dir)
         self.agent_workspace = Path(agent_workspace)
         self.model = model
@@ -199,7 +208,7 @@ class HypothesisGenerator:
 
     def analyze_issue(self, state: State) -> dict:
         """Analyze issue using project knowledge."""
-        print(f"Hypothesis generator #{self.id}: Analyzing {state['issue_dir']}")
+        print(f"Hypothesis generator: Analyzing {state['issue_dir']}")
         start_time = time.perf_counter()
         issue_details = state["issue_details"]
         issue_images = state.get("issue_images") or []
@@ -268,18 +277,19 @@ class HypothesisGenerator:
             {"messages": [message]}
         )
         elapsed = time.perf_counter() - start_time
-        print(f"Hypothesis generator #{self.id}: analysis completed in {elapsed:.2f}s")
+        print(f"Hypothesis generator: analysis completed in {elapsed:.2f}s")
         sr = result.get("structured_response")
         if not isinstance(sr, dict):
             raise ValueError(
-                f"Hypothesis generator #{self.id}: expected structured_response dict, got {type(sr)}"
+                "Hypothesis generator: expected structured_response dict, got "
+                f"{type(sr)}"
             )
         if "symptom_observed" not in sr and "text" in sr:
             try:
                 sr = json.loads(sr["text"])
             except (json.JSONDecodeError, TypeError) as e:
                 raise ValueError(
-                    f"Hypothesis generator #{self.id}: could not parse structured_response: {e}"
+                    f"Hypothesis generator: could not parse structured_response: {e}"
                 ) from e
         return {"issue_analysis_json": sr}
 
@@ -289,21 +299,9 @@ class HypothesisGenerator:
 
     def write_analysis_to_file(self, state: State) -> dict:
         issue_dir = Path(state["issue_dir"])
-        summary_path = issue_dir / "diagnosis.md"
-        print(f"Hypothesis generator #{self.id}: Writing summary to {summary_path}")
-        write_to_file(str(summary_path), state["issue_analysis"], "w")
-
-        hypotheses = state["issue_analysis_json"].get("diagnose_hypothesis") or []
-        if isinstance(hypotheses, list):
-            for i, item in enumerate(hypotheses):
-                if not isinstance(item, dict):
-                    continue
-                n = i + 1
-                hyp_path = issue_dir / f"hypothesis_{n}.md"
-                body = _format_hypothesis_item_markdown(item, n)
-                print(f"Hypothesis generator #{self.id}: Writing hypothesis file {hyp_path.name}")
-                write_to_file(str(hyp_path), body, "w")
-
+        diagnosis_path = issue_dir / "diagnosis.md"
+        print(f"Hypothesis generator #{self.id}: Writing diagnosis to {diagnosis_path}")
+        write_to_file(str(diagnosis_path), state["issue_analysis"], "w")
         return {"write_status": True}
 
     def build_workflow(self):
@@ -361,7 +359,6 @@ def main():
     args = parser.parse_args()
 
     agent = HypothesisGenerator(
-        id='0',
         issue_dir=args.issue_details,
         agent_workspace=args.workspace,
         model=args.model_name,

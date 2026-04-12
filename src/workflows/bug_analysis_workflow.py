@@ -15,7 +15,7 @@ from agents.hypothesis_investigator import HypothesisInvestigator
 
 
 class BugAnalysisWorkflow:
-    """Generate hypotheses for one issue, then investigate each in parallel."""
+    """Generate hypotheses into ``diagnosis.md``, then run one hypothesis investigator on it."""
 
     class State(TypedDict):
         issue_dir: str
@@ -24,7 +24,6 @@ class BugAnalysisWorkflow:
         model: str
         model_provider: str
         api_key: str
-        hypothesis_files: list[str]
 
     def __init__(
         self,
@@ -47,7 +46,6 @@ class BugAnalysisWorkflow:
         issue_dir = Path(state["issue_dir"])
         print(f"Bug Analysis Workflow: running hypothesis generator for {issue_dir}")
         agent = HypothesisGenerator(
-            id="0",
             issue_dir=str(issue_dir),
             agent_workspace=state["agent_workspace_dir"],
             model=state["model"],
@@ -59,63 +57,29 @@ class BugAnalysisWorkflow:
         print("Bug Analysis Workflow: hypothesis generator finished")
         return {}
 
-    def collect_hypothesis_files(self, state: State) -> dict:
-        issue_dir = Path(state["issue_dir"])
-
-        def _hyp_idx(p: Path) -> int:
-            stem = p.stem
-            try:
-                return int(stem.split("_")[-1])
-            except ValueError:
-                return 10**9
-
-        files = sorted(issue_dir.glob("hypothesis_*.md"), key=_hyp_idx)
-        hypothesis_files = [str(p.resolve()) for p in files]
-        print(f"Bug Analysis Workflow: collected {len(hypothesis_files)} hypothesis files")
-        return {"hypothesis_files": hypothesis_files}
-
-    def run_hypothesis_investigators(self, state: State) -> dict:
-        hypothesis_files = state.get("hypothesis_files") or []
-        if not hypothesis_files:
-            print("Bug Analysis Workflow: no hypothesis files found; skipping investigation")
-            return {}
-
-        print(
-            f"Bug Analysis Workflow: running {len(hypothesis_files)} hypothesis investigators in parallel"
+    def run_hypothesis_investigator(self, state: State) -> dict:
+        print("Bug Analysis Workflow: running hypothesis investigator (reads diagnosis.md)")
+        investigator = HypothesisInvestigator(
+            issue_dir=state["issue_dir"],
+            source_dir=state["source_dir"],
+            agent_workspace_dir=state["agent_workspace_dir"],
+            model=state["model"],
+            model_provider=state["model_provider"],
+            api_key=state["api_key"],
         )
-        investigators: list[HypothesisInvestigator] = []
-        for hyp_path in hypothesis_files:
-            investigator = HypothesisInvestigator(
-                issue_dir=state["issue_dir"],
-                hypothesis_path=hyp_path,
-                source_dir=state["source_dir"],
-                agent_workspace_dir=state["agent_workspace_dir"],
-                model=state["model"],
-                model_provider=state["model_provider"],
-                api_key=state["api_key"],
-            )
-            investigator.build_workflow()
-            investigators.append(investigator)
-
-        async def _run_all() -> None:
-            await asyncio.gather(*[i.run() for i in investigators])
-
-        asyncio.run(_run_all())
+        investigator.build_workflow()
+        asyncio.run(investigator.run())
         print("Bug Analysis Workflow: hypothesis investigation finished")
         return {}
 
     def build_workflow(self) -> None:
         workflow = StateGraph(self.State)
         workflow.add_node("run_hypothesis_generator", self.run_hypothesis_generator)
-        workflow.add_node("collect_hypothesis_files", self.collect_hypothesis_files)
-        workflow.add_node(
-            "run_hypothesis_investigators", self.run_hypothesis_investigators
-        )
+        workflow.add_node("run_hypothesis_investigator", self.run_hypothesis_investigator)
 
         workflow.add_edge(START, "run_hypothesis_generator")
-        workflow.add_edge("run_hypothesis_generator", "collect_hypothesis_files")
-        workflow.add_edge("collect_hypothesis_files", "run_hypothesis_investigators")
-        workflow.add_edge("run_hypothesis_investigators", END)
+        workflow.add_edge("run_hypothesis_generator", "run_hypothesis_investigator")
+        workflow.add_edge("run_hypothesis_investigator", END)
         self.workflow = workflow.compile()
 
     def run(self) -> None:
