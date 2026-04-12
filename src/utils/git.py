@@ -90,6 +90,39 @@ _IMAGE_MARKDOWN_PATTERN = re.compile(
 )
 
 
+# Markdown links to GitHub user-uploaded files (logs, dumps, etc.), not only [Image](...).
+_USER_ATTACHMENT_LINK_PATTERN = re.compile(
+    r"\[([^\]]*)\]\((https://github\.com/user-attachments/(?:files|assets)/[^)\s]+)\)",
+    re.IGNORECASE,
+)
+
+
+def extract_github_user_attachment_links(text: str) -> List[Tuple[str, str]]:
+    """
+    Extract (link label, URL) pairs for github.com/user-attachments/files|assets/... links.
+
+    Used for crash logs and other non-image uploads linked as ``[name.ext](url)`` in issue bodies
+    or comments.
+
+    Args:
+        text: Markdown (issue body, comment bodies, etc.).
+
+    Returns:
+        De-duplicated list of (label, url); label may be empty.
+    """
+    if not text:
+        return []
+    seen: set[str] = set()
+    out: List[Tuple[str, str]] = []
+    for m in _USER_ATTACHMENT_LINK_PATTERN.finditer(text):
+        label, url = m.group(1).strip(), m.group(2).strip()
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append((label or url, url))
+    return out
+
+
 def extract_image_markdown(text: str) -> List[str]:
     """
     Extract image URLs from markdown where the link text is exactly "Image".

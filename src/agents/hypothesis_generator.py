@@ -9,16 +9,115 @@ if __name__ == "__main__":
 import argparse
 import asyncio
 import json
+import os
+import re
 import time
+from urllib.parse import urlparse
+
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain.agents.structured_output import ToolStrategy
-from utils import read_file, extract_image_markdown, fetch_image_as_data_url, write_to_file
+from utils import (
+    read_file,
+    extract_image_markdown,
+    extract_github_user_attachment_links,
+    fetch_image_as_data_url,
+    fetch_url_bytes,
+    guess_attachment_extension,
+    is_image_bytes,
+    is_text_bytes,
+    write_to_file,
+)
 
 
 _SUMMARY_SECTION_KEYS = ("symptom_observed", "divergence_point", "issue_type")
+
+_MAX_PROMPT_ATTACHMENT_CHARS = 512 * 1024
+_ATTACHMENT_BASENAME_SAFE = re.compile(r"[^\w.\-]+")
+
+
+def _issue_dir_from_state(issue_dir: str) -> Path:
+    p = Path(issue_dir)
+    return p.parent if p.is_file() else p
+
+
+def _combined_issue_markdown(issue_details: dict) -> str:
+    parts: list[str] = [issue_details.get("body") or ""]
+    for c in issue_details.get("comments") or []:
+        if isinstance(c, dict):
+            parts.append(str(c.get("body") or ""))
+    return "\n\n".join(parts)
+
+
+def _format_issue_comments_for_prompt(issue_details: dict) -> str:
+    """Format GitHub-style issue comments for the triage prompt (author + body per comment)."""
+    comments = issue_details.get("comments") or []
+    if not isinstance(comments, list) or not comments:
+        return ""
+    blocks: list[str] = []
+    for i, c in enumerate(comments, start=1):
+        if not isinstance(c, dict):
+            continue
+        user = (c.get("user") or {}).get("login") or "unknown"
+        body = str(c.get("body") or "").strip()
+        blocks.append(f"Comment {i} (@{user}):\n{body}")
+    return "\n\n".join(blocks).strip()
+
+
+def _sanitize_attachment_basename(name: str, fallback: str) -> str:
+    base = (name or fallback).strip()
+    base = os.path.basename(base.replace("\\", "/"))
+    base = _ATTACHMENT_BASENAME_SAFE.sub("_", base)
+    if not base or base in (".", ".."):
+        base = fallback
+    return base[:180]
+
+
+def _unique_path_in_dir(directory: Path, filename: str) -> Path:
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem, suffix = Path(filename).stem, Path(filename).suffix
+    n = 2
+    while True:
+        alt = directory / f"{stem}_{n}{suffix}"
+        if not alt.exists():
+            return alt
+        n += 1
+
+
+def _truncate_for_prompt(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n\n... [truncated for prompt]"
+
+
+def _build_saved_filename(
+    label: str,
+    url: str,
+    data: bytes,
+    content_type: str,
+    *,
+    image_link_index: int | None = None,
+) -> str:
+    """Basename with extension for a saved attachment."""
+    if image_link_index is not None:
+        ext = guess_attachment_extension(data, content_type)
+        return f"image_{image_link_index}{ext}"
+    label = (label or "").strip()
+    if label and label.lower() != "image":
+        safe = _sanitize_attachment_basename(label, "attachment")
+        if Path(safe).suffix:
+            return safe
+    path_last = urlparse(url).path.rstrip("/").split("/")[-1]
+    if path_last and "." in path_last:
+        safe = _sanitize_attachment_basename(path_last, "attachment")
+        if Path(safe).suffix:
+            return safe
+    ext = guess_attachment_extension(data, content_type)
+    return f"attachment{ext}"
 
 
 def _format_issue_analysis_markdown(data: dict) -> str:
@@ -158,6 +257,7 @@ class HypothesisGenerator:
         agent_workspace: str
         issue_details: dict
         issue_images: list[str]
+        issue_attachment_context: str
         file_analysis: str
         business_analysis: str
         contributor_analysis: str
@@ -185,18 +285,101 @@ class HypothesisGenerator:
         path = Path(state["issue_dir"], "issue_details.json")
         with open(path, "r", encoding="utf-8") as f:
             raw_issue_details = json.load(f)
+        comments = raw_issue_details.get("comments")
+        if not isinstance(comments, list):
+            comments = []
         issue_details = {
             "title": raw_issue_details.get("title", ""),
             "body": raw_issue_details.get("body", ""),
+            "comments": comments,
         }
         return {"issue_details": issue_details}
 
-    def load_issue_images(self, state: State) -> dict:
-        """Load image URLs from issue body into state."""
-        issue_details = state["issue_details"]
-        body = issue_details.get("body") or ""
-        images = extract_image_markdown(body)
-        return {"issue_images": images}
+    def collect_issue_attachments(self, state: State) -> dict:
+        """
+        Download URLs from ``[label](user-attachments/...)`` and ``[Image](...)`` markdown.
+        Saves only images and text under ``<issue_dir>/attachments/``; binary files (e.g. zip)
+        are skipped (not stored, not inlined in the prompt).
+        """
+        issue_dir = _issue_dir_from_state(state["issue_dir"])
+        att_dir = issue_dir / "attachments"
+        att_dir.mkdir(parents=True, exist_ok=True)
+
+        combined = _combined_issue_markdown(state["issue_details"])
+        seen_urls: set[str] = set()
+        context_blocks: list[str] = []
+        issue_images: list[str] = []
+        saved_count = 0
+
+        pairs = extract_github_user_attachment_links(combined)
+        for label, url in pairs:
+            if url in seen_urls:
+                continue
+            got = fetch_url_bytes(url)
+            if not got:
+                print(f"Hypothesis generator: failed to download attachment {url!r}")
+                continue
+            data, ct = got
+
+            if is_image_bytes(data, ct):
+                seen_urls.add(url)
+                fname = _build_saved_filename(label, url, data, ct, image_link_index=None)
+                out_path = _unique_path_in_dir(att_dir, fname)
+                out_path.write_bytes(data)
+                saved_count += 1
+                print(f"Hypothesis generator: saved user attachment -> attachments/{out_path.name}")
+                issue_images.append(url)
+            elif is_text_bytes(data, ct):
+                seen_urls.add(url)
+                fname = _build_saved_filename(label, url, data, ct, image_link_index=None)
+                out_path = _unique_path_in_dir(att_dir, fname)
+                out_path.write_bytes(data)
+                saved_count += 1
+                rel = out_path.name
+                print(f"Hypothesis generator: saved user attachment -> attachments/{rel}")
+                try:
+                    text = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = data.decode("utf-8", errors="replace")
+                context_blocks.append(
+                    f"### {label}\nSource: {url}\nSaved as: attachments/{rel}\n\n"
+                    f"{_truncate_for_prompt(text, _MAX_PROMPT_ATTACHMENT_CHARS)}"
+                )
+            else:
+                seen_urls.add(url)
+                print(
+                    f"Hypothesis generator: skipping binary attachment ({label!r}): {url!r}"
+                )
+
+        for i, url in enumerate(extract_image_markdown(combined)):
+            if url in seen_urls:
+                continue
+            got = fetch_url_bytes(url)
+            if not got:
+                print(f"Hypothesis generator: failed to download image {url!r}")
+                continue
+            data, ct = got
+            if not is_image_bytes(data, ct):
+                seen_urls.add(url)
+                print(
+                    f"Hypothesis generator: skipping non-image [Image] URL (binary or unknown): {url!r}"
+                )
+                continue
+            seen_urls.add(url)
+            fname = _build_saved_filename("", url, data, ct, image_link_index=i)
+            out_path = _unique_path_in_dir(att_dir, fname)
+            out_path.write_bytes(data)
+            saved_count += 1
+            print(f"Hypothesis generator: saved image attachment -> attachments/{out_path.name}")
+            issue_images.append(url)
+
+        ctx = "\n\n---\n\n".join(context_blocks) if context_blocks else ""
+        if ctx or issue_images or saved_count:
+            print(
+                f"Hypothesis generator: attachments: {saved_count} file(s) saved, "
+                f"{len(issue_images)} image URL(s) for multimodal"
+            )
+        return {"issue_images": issue_images, "issue_attachment_context": ctx}
 
     def load_project_knowledge(self, state: State) -> dict:
         """Load project knowledge from agent workspace (file_analysis, business_analysis, contributor_analysis)."""
@@ -215,10 +398,23 @@ class HypothesisGenerator:
         file_analysis = state["file_analysis"]
         business_analysis = state["business_analysis"]
         contributor_analysis = state["contributor_analysis"]
+        attachment_ctx = (state.get("issue_attachment_context") or "").strip()
+        comments_block = _format_issue_comments_for_prompt(issue_details)
+        comments_section = (
+            f"\n            Issue comments (discussion thread):\n            {comments_block}\n"
+            if comments_block
+            else ""
+        )
+        attachment_section = (
+            f"\n            User-uploaded file contents (from linked GitHub attachments):\n"
+            f"            {attachment_ctx}\n"
+            if attachment_ctx
+            else ""
+        )
         prompt = f"""
             You are an experienced software engineer who is talented in bug triageing. 
-            Read the following issue report, combining the title, description, 
-            and attachments, provide an analysis report with the following 6 sections:
+            Read the following issue report, combining the title, description, comments,
+            images, and linked file attachments, provide an analysis report with the following 6 sections:
             1. Symptom Observed
                 - In technical terms, explain the observed symptom of the issue in one sentence.
                 - Assign your symptom analysis a confidence score.
@@ -256,9 +452,9 @@ class HypothesisGenerator:
             - Refer to the provided domain knowledge documents for domain knowledge.
 
             Issue Title: {issue_details["title"]}
-
             Issue Description: {issue_details["body"]}
-            
+            {comments_section}
+            {attachment_section}
             Domain knowledge documents:
             File analysis: {file_analysis}
 
@@ -300,22 +496,22 @@ class HypothesisGenerator:
     def write_analysis_to_file(self, state: State) -> dict:
         issue_dir = Path(state["issue_dir"])
         diagnosis_path = issue_dir / "diagnosis.md"
-        print(f"Hypothesis generator #{self.id}: Writing diagnosis to {diagnosis_path}")
+        print(f"Hypothesis generator: Writing diagnosis to {diagnosis_path}")
         write_to_file(str(diagnosis_path), state["issue_analysis"], "w")
         return {"write_status": True}
 
     def build_workflow(self):
         self.workflow = StateGraph(self.State)
         self.workflow.add_node("load_issue", self.load_issue)
-        self.workflow.add_node("load_issue_images", self.load_issue_images)
+        self.workflow.add_node("collect_issue_attachments", self.collect_issue_attachments)
         self.workflow.add_node("load_project_knowledge", self.load_project_knowledge)
         self.workflow.add_node("analyze_issue", self.analyze_issue)
         self.workflow.add_node("format_issue_analysis_markdown", self.format_issue_analysis_markdown)
         self.workflow.add_node("write_analysis_to_file", self.write_analysis_to_file)
 
         self.workflow.add_edge(START, "load_issue")
-        self.workflow.add_edge("load_issue", "load_issue_images")
-        self.workflow.add_edge("load_issue_images", "load_project_knowledge")
+        self.workflow.add_edge("load_issue", "collect_issue_attachments")
+        self.workflow.add_edge("collect_issue_attachments", "load_project_knowledge")
         self.workflow.add_edge("load_project_knowledge", "analyze_issue")
         self.workflow.add_edge("analyze_issue", "format_issue_analysis_markdown")
         self.workflow.add_edge("format_issue_analysis_markdown", "write_analysis_to_file")

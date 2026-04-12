@@ -184,6 +184,86 @@ def write_to_file(path: str, content: Any, mode: Literal['w', 'a'] = 'a') -> Non
         raise IOError(f"Cannot write to file '{path}': {str(e)}") from e
 
 
+_MAX_ATTACHMENT_TEXT_BYTES = 512 * 1024
+
+
+def fetch_url_text(
+    url: str,
+    *,
+    max_bytes: int = _MAX_ATTACHMENT_TEXT_BYTES,
+    timeout: float = 60.0,
+) -> Optional[str]:
+    """
+    Download a URL and return text (UTF-8), truncating to ``max_bytes``.
+
+    Skips responses whose ``Content-Type`` is clearly ``image/*`` (use
+    :func:`fetch_image_as_data_url` for images).
+
+    Returns:
+        Decoded text, or ``None`` on failure or if skipped as non-text.
+    """
+    if not url:
+        return None
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "RepellentAI/1.0 (issue attachment fetch)"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw_ct = resp.headers.get("Content-Type", "")
+            ct = raw_ct.split(";")[0].strip().lower()
+            if ct.startswith("image/"):
+                return None
+            data = resp.read(max_bytes + 1)
+    except (urllib.error.URLError, OSError) as e:
+        print(f"Warning: could not fetch attachment text {url!r}: {e}")
+        return None
+    truncated = len(data) > max_bytes
+    chunk = data[:max_bytes] if truncated else data
+    try:
+        text = chunk.decode("utf-8")
+    except UnicodeDecodeError:
+        text = chunk.decode("utf-8", errors="replace")
+    if truncated:
+        text += "\n\n... [truncated: attachment exceeded byte limit]"
+    return text
+
+
+_DEFAULT_FETCH_MAX_BYTES = 20 * 1024 * 1024
+
+
+def fetch_url_bytes(
+    url: str,
+    *,
+    max_bytes: int = _DEFAULT_FETCH_MAX_BYTES,
+    timeout: float = 120.0,
+) -> Optional[tuple[bytes, str]]:
+    """
+    Download a URL and return ``(raw_bytes, content_type)`` where ``content_type`` is the
+    header value without parameters.
+
+    Reads at most ``max_bytes`` bytes (truncated if the response is larger).
+    """
+    if not url:
+        return None
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "RepellentAI/1.0 (issue attachment fetch)"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw_ct = resp.headers.get("Content-Type", "") or ""
+            ct = raw_ct.split(";")[0].strip()
+            data = resp.read(max_bytes + 1)
+    except (urllib.error.URLError, OSError) as e:
+        print(f"Warning: could not fetch URL bytes {url!r}: {e}")
+        return None
+    if len(data) > max_bytes:
+        data = data[:max_bytes]
+        print(f"Warning: truncated download to {max_bytes} bytes: {url!r}")
+    return (data, ct)
+
+
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 def _sniff_image_mime(data: bytes) -> Optional[str]:
     if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -195,6 +275,60 @@ def _sniff_image_mime(data: bytes) -> Optional[str]:
     if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return None
+
+
+def is_image_bytes(data: bytes, content_type: str) -> bool:
+    """True if bytes are an image by Content-Type or magic-byte sniffing."""
+    ct = content_type.split(";")[0].strip().lower()
+    if ct.startswith("image/"):
+        return True
+    return _sniff_image_mime(data) is not None
+
+
+def is_text_bytes(data: bytes, content_type: str) -> bool:
+    """Heuristic: treat as text for logs/markdown/json and readable UTF-8."""
+    ct = content_type.split(";")[0].strip().lower()
+    if ct.startswith("text/"):
+        return True
+    if ct in ("application/json", "application/xml", "application/javascript"):
+        return True
+    if "json" in ct or "xml" in ct:
+        return True
+    if is_image_bytes(data, content_type):
+        return False
+    try:
+        s = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not s:
+        return False
+    printable = sum(1 for c in s if c.isprintable() or c in "\n\r\t")
+    return printable / len(s) > 0.88
+
+
+def guess_attachment_extension(data: bytes, content_type: str) -> str:
+    """Pick a filename extension (with leading dot) for saved attachment bytes."""
+    ct = content_type.split(";")[0].strip().lower()
+    if ct.startswith("image/"):
+        sub = ct.split("/", 1)[-1]
+        return {
+            "png": ".png",
+            "jpeg": ".jpg",
+            "jpg": ".jpg",
+            "gif": ".gif",
+            "webp": ".webp",
+        }.get(sub, ".img")
+    sniff = _sniff_image_mime(data)
+    if sniff:
+        return {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/gif": ".gif",
+            "image/webp": ".webp",
+        }.get(sniff, ".img")
+    if is_text_bytes(data, content_type):
+        return ".txt"
+    return ".bin"
 
 
 def fetch_image_as_data_url(url: str, timeout: float = 30.0) -> Optional[str]:

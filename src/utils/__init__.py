@@ -2,7 +2,12 @@
 
 from .files import (
     fetch_image_as_data_url,
+    fetch_url_bytes,
+    fetch_url_text,
     get_current_working_directory,
+    guess_attachment_extension,
+    is_image_bytes,
+    is_text_bytes,
     list_files,
     list_source_files_recursive,
     list_cwd_source_files_recursive,
@@ -10,6 +15,7 @@ from .files import (
     write_to_file,
 )
 from .git import (
+    extract_github_user_attachment_links,
     extract_image_markdown,
     extract_issue_fields,
     fetch_issue_comments,
@@ -24,8 +30,14 @@ from .git import (
 )
 
 __all__ = [
+    'extract_github_user_attachment_links',
     'extract_image_markdown',
     'fetch_image_as_data_url',
+    'fetch_url_bytes',
+    'fetch_url_text',
+    'guess_attachment_extension',
+    'is_image_bytes',
+    'is_text_bytes',
     'extract_issue_fields',
     'fetch_issue_comments',
     'format_issue',
