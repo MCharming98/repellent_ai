@@ -1,4 +1,4 @@
-"""Investigates a single hypothesis against an issue using workspace knowledge."""
+"""Investigates a single hypothesis against an issue using domain knowledge."""
 
 import asyncio
 import json
@@ -121,7 +121,7 @@ def extract_tool_use_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
 
 
 class HypothesisInvestigator:
-    """Validates or falsifies one hypothesis using issue context and agent workspace data."""
+    """Validates or falsifies one hypothesis using issue context and domain knowledge."""
 
     class State(TypedDict):
         issue_details: dict
@@ -134,14 +134,14 @@ class HypothesisInvestigator:
         self,
         issue_dir: str,
         source_dir: str,
-        agent_workspace_dir: str,
+        domain_knowledge_dir: str,
         model: str,
         model_provider: str,
         api_key: str,
     ) -> None:
         self.issue_dir = issue_dir
         self.source_dir = source_dir
-        self.agent_workspace_dir = agent_workspace_dir
+        self.domain_knowledge_dir = domain_knowledge_dir
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
@@ -157,7 +157,7 @@ class HypothesisInvestigator:
         self.workflow = None
 
     def load_context(self, state: State) -> dict:
-        """Load issue JSON, diagnosis.md (including hypotheses), and workspace file analysis."""
+        """Load issue JSON, diagnosis.md (including hypotheses), and file_analysis from domain knowledge."""
         issue_dir = Path(self.issue_dir)
         if issue_dir.is_file():
             issue_dir = issue_dir.parent
@@ -167,7 +167,7 @@ class HypothesisInvestigator:
         diagnosis_path = issue_dir / "diagnosis.md"
         diagnosis = read_file(str(diagnosis_path))
         file_analysis = read_file(
-            str(Path(self.agent_workspace_dir) / "file_analysis.md")
+            str(Path(self.domain_knowledge_dir) / "file_analysis.md")
         )
         return {
             "issue_details": issue_details,
@@ -278,10 +278,10 @@ def main() -> None:
         help="Source repository dir used as working dir during investigation",
     )
     parser.add_argument(
-        "--workspace",
+        "--domain-knowledge",
         required=True,
-        dest="agent_workspace_dir",
-        help="Agent workspace dir (contains file_analysis.md)",
+        dest="domain_knowledge_dir",
+        help="Domain knowledge dir (contains file_analysis.md)",
     )
     parser.add_argument("--model", default="gemini-3-flash-preview")
     parser.add_argument("--model-provider", default="google_genai")
@@ -291,7 +291,7 @@ def main() -> None:
     investigator = HypothesisInvestigator(
         issue_dir=args.issue_dir,
         source_dir=args.source_dir,
-        agent_workspace_dir=args.agent_workspace_dir,
+        domain_knowledge_dir=args.domain_knowledge_dir,
         model=args.model,
         model_provider=args.model_provider,
         api_key=args.api_key,

@@ -31,7 +31,7 @@ class TrainingWorkflow:
         github_url: str,
         output_dir: str = "issues",
         max_issues: int = 100,
-        agent_workspace: str | None = None,
+        domain_knowledge: str | None = None,
         model: str = "gemini-3-flash-preview",
         model_provider: str = "google_genai",
         api_key: str | None = None,
@@ -39,7 +39,7 @@ class TrainingWorkflow:
         self.github_url = github_url
         self.output_dir = output_dir
         self.max_issues = max_issues
-        self.agent_workspace = agent_workspace
+        self.domain_knowledge = domain_knowledge
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
@@ -101,8 +101,8 @@ class TrainingWorkflow:
         return {}
 
     def run_issue_analysis_agents(self, state: State):
-        if not self.agent_workspace or not self.api_key:
-            print("Training Workflow: Skipping issue analysis (no --workspace or --api-key)")
+        if not self.domain_knowledge or not self.api_key:
+            print("Training Workflow: Skipping issue analysis (no --domain-knowledge or --api-key)")
             return {}
 
         repo = state["repo"]
@@ -121,14 +121,14 @@ class TrainingWorkflow:
 
         print(
             f"Training Workflow: Running {len(issue_dirs)} issue analysis agents in parallel "
-            f"(workspace={self.agent_workspace})..."
+            f"(domain_knowledge={self.domain_knowledge})..."
         )
 
         agents: list[HypothesisGenerator] = []
         for issue_dir in issue_dirs:
             agent = HypothesisGenerator(
                 str(issue_dir.resolve()),
-                str(Path(self.agent_workspace).resolve()),
+                str(Path(self.domain_knowledge).resolve()),
                 self.model,
                 self.model_provider,
                 self.api_key,
@@ -187,9 +187,10 @@ def main():
         help="Maximum number of issues to fetch (default: 100)",
     )
     parser.add_argument(
-        "--workspace",
+        "--domain-knowledge",
         default=None,
-        help="Agent workspace with analysis markdown; if set with --api-key, runs issue analysis per issue after fetch",
+        dest="domain_knowledge",
+        help="Domain knowledge dir with analysis markdown; if set with --api-key, runs issue analysis per issue after fetch",
     )
     parser.add_argument(
         "--model-name",
@@ -204,18 +205,18 @@ def main():
     parser.add_argument(
         "--api-key",
         default=None,
-        help="API key for issue analysis (required when --workspace is set)",
+        help="API key for issue analysis (required when --domain-knowledge is set)",
     )
     args = parser.parse_args()
 
-    if args.workspace and not args.api_key:
-        parser.error("--api-key is required when --workspace is set")
+    if args.domain_knowledge and not args.api_key:
+        parser.error("--api-key is required when --domain-knowledge is set")
 
     workflow = TrainingWorkflow(
         github_url=args.github_url,
         output_dir=args.output_dir,
         max_issues=args.max_issues,
-        agent_workspace=args.workspace,
+        domain_knowledge=args.domain_knowledge,
         model=args.model_name,
         model_provider=args.model_provider,
         api_key=args.api_key,

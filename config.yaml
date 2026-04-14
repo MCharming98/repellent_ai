@@ -1,0 +1,14 @@
+# Repellent AI — main entry.
+#
+# repository: path to the source repository to analyze (required).
+repository: projects/AntennaPod
+
+# Batch size for file analysis (FileAnalyzer batches).
+file_analysis_batch_size: 10
+
+model_name: gemini-3-flash-preview
+model_provider: google_genai
+
+# API key: paste the key directly, or reference an env var with $VAR_NAME or ${VAR_NAME}
+# (e.g. api_key: $GEMINI_API_KEY). If empty/unset, LLM_API_KEY / GOOGLE_API_KEY are used.
+api_key: $GEMINI_API_KEY

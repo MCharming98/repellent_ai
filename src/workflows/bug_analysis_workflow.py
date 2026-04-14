@@ -20,7 +20,7 @@ class BugAnalysisWorkflow:
     class State(TypedDict):
         issue_dir: str
         source_dir: str
-        agent_workspace_dir: str
+        domain_knowledge_dir: str
         model: str
         model_provider: str
         api_key: str
@@ -29,14 +29,14 @@ class BugAnalysisWorkflow:
         self,
         issue_dir: str,
         source_dir: str,
-        agent_workspace_dir: str,
+        domain_knowledge_dir: str,
         model: str,
         model_provider: str,
         api_key: str,
     ) -> None:
         self.issue_dir = str(Path(issue_dir).resolve())
         self.source_dir = str(Path(source_dir).resolve())
-        self.agent_workspace_dir = str(Path(agent_workspace_dir).resolve())
+        self.domain_knowledge_dir = str(Path(domain_knowledge_dir).resolve())
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
@@ -47,7 +47,7 @@ class BugAnalysisWorkflow:
         print(f"Bug Analysis Workflow: running hypothesis generator for {issue_dir}")
         agent = HypothesisGenerator(
             issue_dir=str(issue_dir),
-            agent_workspace=state["agent_workspace_dir"],
+            domain_knowledge=state["domain_knowledge_dir"],
             model=state["model"],
             model_provider=state["model_provider"],
             api_key=state["api_key"],
@@ -62,7 +62,7 @@ class BugAnalysisWorkflow:
         investigator = HypothesisInvestigator(
             issue_dir=state["issue_dir"],
             source_dir=state["source_dir"],
-            agent_workspace_dir=state["agent_workspace_dir"],
+            domain_knowledge_dir=state["domain_knowledge_dir"],
             model=state["model"],
             model_provider=state["model_provider"],
             api_key=state["api_key"],
@@ -89,7 +89,7 @@ class BugAnalysisWorkflow:
             {
                 "issue_dir": self.issue_dir,
                 "source_dir": self.source_dir,
-                "agent_workspace_dir": self.agent_workspace_dir,
+                "domain_knowledge_dir": self.domain_knowledge_dir,
                 "model": self.model,
                 "model_provider": self.model_provider,
                 "api_key": self.api_key,
@@ -114,9 +114,10 @@ def main() -> None:
         help="Path to source repository used by investigation tools",
     )
     parser.add_argument(
-        "--workspace",
+        "--domain-knowledge",
         required=True,
-        help="Agent workspace directory containing file_analysis.md",
+        dest="domain_knowledge_dir",
+        help="Domain knowledge directory containing file_analysis.md",
     )
     parser.add_argument(
         "--model",
@@ -135,7 +136,7 @@ def main() -> None:
     workflow = BugAnalysisWorkflow(
         issue_dir=args.issue_dir,
         source_dir=args.source_dir,
-        agent_workspace_dir=args.workspace,
+        domain_knowledge_dir=args.domain_knowledge_dir,
         model=args.model,
         model_provider=args.model_provider,
         api_key=args.api_key,

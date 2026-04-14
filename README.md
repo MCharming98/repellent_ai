@@ -4,39 +4,28 @@
 
 ## Entry Point
 
-The main entry point is `src/main.py`:
+The main entry point is `src/main.py`. Configure `config.yaml` at the repository root (see that file for `repository`, model settings, and API key / env vars). Analysis outputs are always written under `domain_knowledge/<project_name>/` (relative to the current working directory).
 
 ```bash
-python src/main.py --repository /path/to/source/repo --api-key YOUR_API_KEY
+PYTHONPATH=src python src/main.py
 ```
-
-### Options
-
-| Option | Required | Default | Description |
-|--------|----------|---------|-------------|
-| `--repository` | Yes | — | Path to the source repository |
-| `--api-key` | Yes | — | API key for the LLM provider |
-| `--workspace` | No | `agent_workspace/<project_name>` | Directory for analysis outputs |
-| `--batch-size` | No | 10 | Batch size for structural analysis |
-| `--model_name` | No | gemini-3-flash-preview | LLM model to use |
-| `--model_provider` | No | google_genai | LLM provider (e.g. google_genai, anthropic) |
 
 ## Architecture
 
 The onboarding pipeline runs three workflows in sequence:
 
-1. **Structural Analysis** → 2. **Business Analysis** → 3. **Contributor Analysis**
+1. **File Analysis** → 2. **Business Analysis** → 3. **Contributor Analysis**
 
 ### Workflows
 
 - **Onboarding Workflow** (`workflows/onboarding_workflow.py`)  
-  Orchestrates the full onboarding pipeline: structural analysis, business analysis, and contributor analysis. Outputs are written to the agent workspace.
+  Orchestrates the full onboarding pipeline: file analysis, business analysis, and contributor analysis. Outputs are written under `domain_knowledge/<project_name>/`.
 
-- **Structural Analysis Workflow** (`workflows/structural_analysis_workflow.py`)  
+- **File Analysis Workflow** (`workflows/file_analysis_workflow.py`)  
   Recursively discovers source files, creates parallel analysis agents, and produces a per-file analysis including responsibilities, contributors, and functions. Output: `file_analysis.md`.
 
 - **Business Analysis Workflow** (`workflows/business_analysis_workflow.py`)  
-  Reads the structural analysis and generates a business and Critical User Journey (CUJ) overview: product summary, audience, use cases, features, and CUJ stages with linked source files. Output: `business_analysis.md`.
+  Reads the file analysis and generates a business and Critical User Journey (CUJ) overview: product summary, audience, use cases, features, and CUJ stages with linked source files. Output: `business_analysis.md`.
 
 - **Contributor Analysis Workflow** (`workflows/contributor_analysis_workflow.py`)  
   Gathers contributor data per file and produces an analysis of all contributors: names, accounts, commit counts, and contribution summaries. Output: `contributor_analysis.md`.
@@ -52,7 +41,7 @@ The onboarding pipeline runs three workflows in sequence:
 
 ## Output
 
-All outputs go under the workspace directory (default: `agent_workspace/<project_name>/`):
+All outputs go under `domain_knowledge/<project_name>/` (not configurable):
 
 - `file_analysis.md` — Per-file structural analysis
 - `business_analysis.md` — Business logic and CUJ analysis

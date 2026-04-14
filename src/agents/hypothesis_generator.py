@@ -1,4 +1,4 @@
-"""Generates structured issue analysis and hypotheses using project knowledge from the agent workspace."""
+"""Generates structured issue analysis and hypotheses using domain knowledge artifacts."""
 
 import sys
 from pathlib import Path
@@ -173,11 +173,11 @@ def _format_hypothesis_item_markdown(item: dict, index_one_based: int) -> str:
 
 
 class HypothesisGenerator:
-    """Triages an issue and emits hypotheses with investigation actions using workspace knowledge."""
+    """Triages an issue and emits hypotheses with investigation actions using domain knowledge."""
 
     class State(TypedDict):
         issue_dir: str
-        agent_workspace: str
+        domain_knowledge: str
         issue_details: dict
         issue_images: list[str]
         issue_attachment_context: str
@@ -188,9 +188,9 @@ class HypothesisGenerator:
         issue_diagnosis: str
         write_status: bool
 
-    def __init__(self, issue_dir: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
+    def __init__(self, issue_dir: str, domain_knowledge: str, model: str, model_provider: str, api_key: str):
         self.issue_dir = Path(issue_dir)
-        self.agent_workspace = Path(agent_workspace)
+        self.domain_knowledge = Path(domain_knowledge)
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
@@ -403,14 +403,14 @@ class HypothesisGenerator:
     async def run(self):
         final_state = await self.workflow.ainvoke({
             "issue_dir": str(self.issue_dir),
-            "agent_workspace": str(self.agent_workspace),
+            "domain_knowledge": str(self.domain_knowledge),
         })
         return final_state
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyze a GitHub issue using project knowledge from an agent workspace"
+        description="Analyze a GitHub issue using domain knowledge (file_analysis, business, contributor)"
     )
     parser.add_argument(
         "--issue-details",
@@ -419,9 +419,9 @@ def main():
         help="Path to issue_details.json",
     )
     parser.add_argument(
-        "--workspace",
+        "--domain-knowledge",
         required=True,
-        help="Agent workspace dir (file_analysis.md, business_analysis.md, contributor_analysis.md)",
+        help="Domain knowledge dir (file_analysis.md, business_analysis.md, contributor_analysis.md)",
     )
     parser.add_argument(
         "--model_name",
@@ -438,7 +438,7 @@ def main():
 
     agent = HypothesisGenerator(
         issue_dir=args.issue_details,
-        agent_workspace=args.workspace,
+        domain_knowledge=args.domain_knowledge,
         model=args.model_name,
         model_provider=args.model_provider,
         api_key=args.api_key,

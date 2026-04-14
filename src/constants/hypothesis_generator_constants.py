@@ -107,7 +107,7 @@ def get_hypothesis_generator_prompt(
                     1. Mechanism analysis:
                         - A step-by-step causal chain explaining how the system transitions from a correct state to the observed failure.
                         - Reference specific components (functions, services, data flow).
-                        - If the diagnose points to source code, provide the file name and the function/class name, if applicable, by referring to the structural analysis.
+                        - If the diagnose points to source code, provide the file name and the function/class name, if applicable, by referring to the file analysis.
                     2. Observable implications analysis:
                         - What logs, metrics, or behaviors must be true if this hypothesis is correct?
                     3. Investigation actions:
