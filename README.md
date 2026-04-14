@@ -7,7 +7,13 @@
 The main entry point is `src/main.py`. Configure `config.yaml` at the repository root (see that file for `repository`, model settings, and API key / env vars). Analysis outputs are always written under `domain_knowledge/<project_name>/` (relative to the current working directory).
 
 ```bash
-PYTHONPATH=src python src/main.py
+PYTHONPATH=src python src/main.py onboard
+```
+
+With a `main` launcher in your `PATH` (or `python main.py onboard` if you name the entry script `main.py`):
+
+```bash
+python main onboard
 ```
 
 ## Architecture

@@ -1,3 +1,4 @@
+import argparse
 import os
 import re
 import sys
@@ -46,7 +47,7 @@ def _load_config(path: Path) -> dict:
     return data
 
 
-def main() -> None:
+def _run_onboard() -> None:
     cfg = _load_config(_default_config_path())
 
     repository = (cfg.get("repository") or "").strip()
@@ -83,6 +84,40 @@ def main() -> None:
     )
     onboarding_workflow.build_workflow()
     onboarding_workflow.run()
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="main",
+        description="Repellent AI — run subcommands for onboarding and analysis.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python main onboard\n"
+            "  PYTHONPATH=src python src/main.py onboard\n"
+        ),
+    )
+    sub = parser.add_subparsers(
+        dest="command",
+        metavar="COMMAND",
+        help="Subcommand to run (required).",
+    )
+    sub.add_parser(
+        "onboard",
+        help="Run onboarding: file analysis, business analysis, contributor analysis (reads config.yaml).",
+    )
+    return parser
+
+
+def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+        sys.exit(0)
+    if args.command == "onboard":
+        _run_onboard()
+        return
 
 
 if __name__ == "__main__":
