@@ -19,6 +19,10 @@ from langgraph.graph import StateGraph, START, END
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain.agents.structured_output import ToolStrategy
+from constants.hypothesis_generator_constants import (
+    ISSUE_DIAGNOSES_SCHEMA,
+    get_hypothesis_generator_prompt,
+)
 from utils import (
     read_file,
     extract_image_markdown,
@@ -28,22 +32,22 @@ from utils import (
     guess_attachment_extension,
     is_image_bytes,
     is_text_bytes,
+    format_key_to_subheading,
     write_to_file,
 )
 
 
 _SUMMARY_SECTION_KEYS = ("symptom_observed", "divergence_point", "issue_type")
 
-_MAX_PROMPT_ATTACHMENT_CHARS = 512 * 1024
 _ATTACHMENT_BASENAME_SAFE = re.compile(r"[^\w.\-]+")
 
 
-def _issue_dir_from_state(issue_dir: str) -> Path:
-    p = Path(issue_dir)
-    return p.parent if p.is_file() else p
-
-
 def _combined_issue_markdown(issue_details: dict) -> str:
+    """Concatenate issue body and all comment bodies for link scanning.
+
+    Used by attachment collection so we can discover markdown links in both the
+    original issue description and follow-up discussion comments.
+    """
     parts: list[str] = [issue_details.get("body") or ""]
     for c in issue_details.get("comments") or []:
         if isinstance(c, dict):
@@ -67,6 +71,11 @@ def _format_issue_comments_for_prompt(issue_details: dict) -> str:
 
 
 def _sanitize_attachment_basename(name: str, fallback: str) -> str:
+    """Sanitize a candidate filename to a safe basename.
+
+    Strips directory components, replaces unsafe chars, guards against ``.``/``..``,
+    and enforces a length cap to avoid path/FS issues.
+    """
     base = (name or fallback).strip()
     base = os.path.basename(base.replace("\\", "/"))
     base = _ATTACHMENT_BASENAME_SAFE.sub("_", base)
@@ -76,6 +85,11 @@ def _sanitize_attachment_basename(name: str, fallback: str) -> str:
 
 
 def _unique_path_in_dir(directory: Path, filename: str) -> Path:
+    """Return a non-colliding file path inside ``directory``.
+
+    Keeps the original name when available, otherwise appends ``_2``, ``_3``, etc.
+    before the extension.
+    """
     candidate = directory / filename
     if not candidate.exists():
         return candidate
@@ -86,12 +100,6 @@ def _unique_path_in_dir(directory: Path, filename: str) -> Path:
         if not alt.exists():
             return alt
         n += 1
-
-
-def _truncate_for_prompt(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "\n\n... [truncated for prompt]"
 
 
 def _build_saved_filename(
@@ -120,14 +128,14 @@ def _build_saved_filename(
     return f"attachment{ext}"
 
 
-def _format_issue_analysis_markdown(data: dict) -> str:
+def _format_issue_diagnosis_markdown(data: dict) -> str:
     """Render full diagnosis.md: triage sections plus all diagnose hypotheses."""
     blocks: list[str] = []
     for key in _SUMMARY_SECTION_KEYS:
         if key not in data:
             continue
         val = data[key]
-        blocks.append(f"## {key}\n")
+        blocks.append(f"## {format_key_to_subheading(key)}\n")
         if isinstance(val, dict):
             blocks.append(str(val.get("analysis", "")).strip())
             blocks.append("")
@@ -164,91 +172,6 @@ def _format_hypothesis_item_markdown(item: dict, index_one_based: int) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-ISSUE_ANALYSIS_SCHEMA = {
-    "type": "object",
-    "description": "Issue analysis of the issue",
-    "properties": {
-        "symptom_observed": {
-            "type": "object",
-            "properties": {
-                "analysis": {
-                    "type": "string",
-                    "description": "The analysis of the symptom of the issue",
-                },
-                "confidence_score": {
-                    "type": "number",
-                    "description": "The confidence score of the symptom",
-                    "minimum": 0,
-                    "maximum": 100,
-                },
-            },
-            "required": ["analysis", "confidence_score"],
-        },
-        "divergence_point": {
-            "type": "object",
-            "description": "The divergence point between the expected and the actual behavior/CUJ in one sentence",
-            "properties": {
-                "analysis": {
-                    "type": "string",
-                    "description": "The analysis of the expected behavior/CUJ and the divergence point between the expected and the actual behavior/CUJ",
-                },
-                "confidence_score": {
-                    "type": "number",
-                    "description": "The confidence score of the divergence point",
-                    "minimum": 0,
-                    "maximum": 100,
-                },
-            },
-            "required": ["analysis", "confidence_score"],
-        },
-        "issue_type": {
-            "type": "object",
-            "properties": {
-                "analysis": {
-                    "type": "string",
-                    "description": "The analysis and rationale of the issue type: e.g. bug, expected behavior, UX issue, or a feature request",
-                },
-                "confidence_score": {
-                    "type": "number",
-                    "description": "The confidence score of the issue type",
-                    "minimum": 0,
-                    "maximum": 100,
-                },
-            },
-            "required": ["analysis", "confidence_score"],
-        },
-        "diagnose_hypothesis": {
-            "type": "array",
-            "description": "The list of diagnose hypothesis and recommended actions for the issue",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "hypothesis": {
-                        "type": "string",
-                        "description": "The diagnose hypothesis",
-                    },
-                    "investigation_actions": {
-                        "type": "array",
-                        "description": "The list of actions to further investigate into the diagnose hypothesis",
-                        "items": {
-                            "type": "string",
-                            "description": "The detailed recommend action",
-                        },
-                    },
-                    "confidence_score": {
-                        "type": "number",
-                        "description": "The confidence score of the diagnose hypothesis",
-                        "minimum": 0,
-                        "maximum": 100,
-                    },
-                },
-                "required": ["hypothesis", "investigation_actions", "confidence_score"],
-            },
-        },
-    },
-    "required": ["symptom_observed", "divergence_point", "issue_type", "diagnose_hypothesis"],
-}
-
 class HypothesisGenerator:
     """Triages an issue and emits hypotheses with investigation actions using workspace knowledge."""
 
@@ -261,8 +184,8 @@ class HypothesisGenerator:
         file_analysis: str
         business_analysis: str
         contributor_analysis: str
-        issue_analysis_json: dict
-        issue_analysis: str
+        issue_diagnosis_json: dict
+        issue_diagnosis: str
         write_status: bool
 
     def __init__(self, issue_dir: str, agent_workspace: str, model: str, model_provider: str, api_key: str):
@@ -277,7 +200,7 @@ class HypothesisGenerator:
             model_kwargs["google_api_key"] = api_key
         self.agent = create_agent(
             model=init_chat_model(model, model_provider=model_provider, **model_kwargs),
-            response_format=ToolStrategy(ISSUE_ANALYSIS_SCHEMA)
+            response_format=ToolStrategy(ISSUE_DIAGNOSES_SCHEMA)
         )
 
     def load_issue(self, state: State) -> dict:
@@ -301,7 +224,7 @@ class HypothesisGenerator:
         Saves only images and text under ``<issue_dir>/attachments/``; binary files (e.g. zip)
         are skipped (not stored, not inlined in the prompt).
         """
-        issue_dir = _issue_dir_from_state(state["issue_dir"])
+        issue_dir = Path(state["issue_dir"])
         att_dir = issue_dir / "attachments"
         att_dir.mkdir(parents=True, exist_ok=True)
 
@@ -343,7 +266,7 @@ class HypothesisGenerator:
                     text = data.decode("utf-8", errors="replace")
                 context_blocks.append(
                     f"### {label}\nSource: {url}\nSaved as: attachments/{rel}\n\n"
-                    f"{_truncate_for_prompt(text, _MAX_PROMPT_ATTACHMENT_CHARS)}"
+                    f"{text}"
                 )
             else:
                 seen_urls.add(url)
@@ -411,55 +334,14 @@ class HypothesisGenerator:
             if attachment_ctx
             else ""
         )
-        prompt = f"""
-            You are an experienced software engineer who is talented in bug triageing. 
-            Read the following issue report, combining the title, description, comments,
-            images, and linked file attachments, provide an analysis report with the following 6 sections:
-            1. Symptom Observed
-                - In technical terms, explain the observed symptom of the issue in one sentence.
-                - Assign your symptom analysis a confidence score.
-            2. Behavior Divergence Point
-                - List the expected behavior or CUJ the user was supposed to go through.
-                - Explain the divergence point between the expected and the actual behavior in one sentence.
-                - Assign your divergence point analysis a confidence score.
-            3. Issue Type
-                - Hypothesize the type of the issue: a bug, expected behavior, UX issue, or a feature request.
-                - Explain your rationale in one sentence.
-                - Assign your issue type analysis a confidence score.
-            4. Diagnose Hypothesis and Investigation Actions
-                - List up to 5 hypotheses that are mutually distinct in root cause, not variations of the same issue.
-                - For each hypothesis, provide the following:
-                    1. Mechanism analysis:
-                        - A step-by-step causal chain explaining how the system transitions from a correct state to the observed failure.
-                        - Reference specific components (functions, services, data flow).
-                        - If the diagnose points to source code, provide the file name and the function/class name, if applicable, by referring to the structural analysis.
-                    2. Observable implications analysis:
-                        - What logs, metrics, or behaviors must be true if this hypothesis is correct?
-                    3. Investigation actions:
-                        - Provide 5 concrete actions that would confirm or falsify this hypothesis.
-                        - Sample actions include but are not limited to: code inspection, log query, unit test, web search, ask user, etc.
-                    4. Confidence score:
-                        - Based on completeness of mechanism, testability, and clear actionable steps (not intuition).
-                - Constraints:
-                    - Do NOT output vague causes (e.g., "race condition", "bug in logic")
-                    without explaining the exact mechanism.
-                    - Prefer hypotheses that can be tested quickly.
-                    - Each hypothesis must be falsifiable.
-
-            Rules and Guidelines:
-            - Your language should be techinical-oriented, so engineers can quickly understand and investigate.
-            - Your analysis should be concise and straight to the point.
-            - Refer to the provided domain knowledge documents for domain knowledge.
-
-            Issue Title: {issue_details["title"]}
-            Issue Description: {issue_details["body"]}
-            {comments_section}
-            {attachment_section}
-            Domain knowledge documents:
-            File analysis: {file_analysis}
-
-            Business analysis: {business_analysis}
-        """
+        prompt = get_hypothesis_generator_prompt(
+            issue_title=issue_details["title"],
+            issue_description=issue_details["body"],
+            comments_section=comments_section,
+            attachment_section=attachment_section,
+            file_analysis=file_analysis,
+            business_analysis=business_analysis,
+        )
         image_blocks = []
         for image_url in issue_images:
             data_url = fetch_image_as_data_url(image_url)
@@ -487,17 +369,17 @@ class HypothesisGenerator:
                 raise ValueError(
                     f"Hypothesis generator: could not parse structured_response: {e}"
                 ) from e
-        return {"issue_analysis_json": sr}
+        return {"issue_diagnosis_json": sr}
 
-    def format_issue_analysis_markdown(self, state: State) -> dict:
-        md = _format_issue_analysis_markdown(state["issue_analysis_json"])
-        return {"issue_analysis": md}
+    def format_issue_diagnosis_markdown(self, state: State) -> dict:
+        md = _format_issue_diagnosis_markdown(state["issue_diagnosis_json"])
+        return {"issue_diagnosis": md}
 
     def write_analysis_to_file(self, state: State) -> dict:
         issue_dir = Path(state["issue_dir"])
         diagnosis_path = issue_dir / "diagnosis.md"
         print(f"Hypothesis generator: Writing diagnosis to {diagnosis_path}")
-        write_to_file(str(diagnosis_path), state["issue_analysis"], "w")
+        write_to_file(str(diagnosis_path), state["issue_diagnosis"], "w")
         return {"write_status": True}
 
     def build_workflow(self):
@@ -506,15 +388,15 @@ class HypothesisGenerator:
         self.workflow.add_node("collect_issue_attachments", self.collect_issue_attachments)
         self.workflow.add_node("load_project_knowledge", self.load_project_knowledge)
         self.workflow.add_node("analyze_issue", self.analyze_issue)
-        self.workflow.add_node("format_issue_analysis_markdown", self.format_issue_analysis_markdown)
+        self.workflow.add_node("format_issue_diagnosis_markdown", self.format_issue_diagnosis_markdown)
         self.workflow.add_node("write_analysis_to_file", self.write_analysis_to_file)
 
         self.workflow.add_edge(START, "load_issue")
         self.workflow.add_edge("load_issue", "collect_issue_attachments")
         self.workflow.add_edge("collect_issue_attachments", "load_project_knowledge")
         self.workflow.add_edge("load_project_knowledge", "analyze_issue")
-        self.workflow.add_edge("analyze_issue", "format_issue_analysis_markdown")
-        self.workflow.add_edge("format_issue_analysis_markdown", "write_analysis_to_file")
+        self.workflow.add_edge("analyze_issue", "format_issue_diagnosis_markdown")
+        self.workflow.add_edge("format_issue_diagnosis_markdown", "write_analysis_to_file")
         self.workflow.add_edge("write_analysis_to_file", END)
         self.workflow = self.workflow.compile()
 

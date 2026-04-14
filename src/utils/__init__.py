@@ -28,6 +28,7 @@ from .git import (
     save_issues_to_json,
     save_issues_to_text,
 )
+from .text import format_key_to_subheading
 
 __all__ = [
     'extract_github_user_attachment_links',
@@ -54,4 +55,5 @@ __all__ = [
     'save_issue_details_to_json',
     'save_issues_to_json',
     'save_issues_to_text',
+    'format_key_to_subheading',
 ]

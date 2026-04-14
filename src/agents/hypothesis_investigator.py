@@ -20,15 +20,12 @@ from constants.hypothesis_investigator_constants import (
     INVESTIGATION_ANALYSIS_SCHEMA,
     get_hypothesis_investigator_prompt,
 )
-from utils import read_file, write_to_file
+from utils import format_key_to_subheading, read_file, write_to_file
 from utils.langchain import get_llm_agent
 from utils.tools import list_files_tool, list_source_files_recursive_tool, read_file_tool, write_to_file_tool 
 
 # Stable section order for markdown output (schema ``required`` order).
 _INVESTIGATION_MARKDOWN_KEY_ORDER = tuple(INVESTIGATION_ANALYSIS_SCHEMA["required"])
-
-def _investigation_key_to_subheading(key: str) -> str:
-    return key.replace("_", " ").strip().title()
 
 def format_investigation_analysis_to_markdown(data: dict) -> str:
     """
@@ -43,7 +40,7 @@ def format_investigation_analysis_to_markdown(data: dict) -> str:
         if key not in data:
             continue
         val = data[key]
-        lines.append(f"### {_investigation_key_to_subheading(key)}")
+        lines.append(f"### {format_key_to_subheading(key)}")
         lines.append("")
         if isinstance(val, list):
             for item in val:

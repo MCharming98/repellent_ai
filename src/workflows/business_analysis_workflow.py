@@ -8,17 +8,10 @@ from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
 from utils import *
 
-BUSINESS_ANALYSIS_SCHEMA = {
-    "type": "object",
-    "description": "Business and Critical User Journey analysis of the product",
-    "properties": {
-        "text": {
-            "type": "string",
-            "description": "The full business and CUJ analysis in markdown format",
-        }
-    },
-    "required": ["text"],
-}
+from constants.business_analysis_constants import (
+    BUSINESS_ANALYSIS_SCHEMA,
+    get_business_analysis_prompt,
+)
 
 
 class BusinessAnalysisWorkflow():
@@ -49,16 +42,7 @@ class BusinessAnalysisWorkflow():
         thread.start()
         input_path = PurePath(state["read_directory"], "file_analysis.md")
         input = read_file(str(input_path))
-        prompt = f"""
-            Read through the file analysis summary to understand the product's business logics, use cases and critical user journey(CUJ) for each use case.
-            Your task is to compose a business and CUJ analysis of this product, containing:
-                - High-level overview of the product
-                - The intended audience of the product
-                - The use cases and features of the product
-                - The CUJ for each use case. Each CUJ stage should point to the source code files it interacts with
-
-            File analysis input: {input}
-            """
+        prompt = get_business_analysis_prompt(input)
         agent = create_agent(
             model=init_chat_model(self.model, model_provider=self.model_provider, api_key=self.api_key),
             response_format=ToolStrategy(BUSINESS_ANALYSIS_SCHEMA),

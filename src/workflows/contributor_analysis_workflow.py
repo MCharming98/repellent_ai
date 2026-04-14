@@ -8,17 +8,10 @@ from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
 from utils import *
 
-CONTRIBUTOR_ANALYSIS_SCHEMA = {
-    "type": "object",
-    "description": "Contributor analysis of the repository",
-    "properties": {
-        "text": {
-            "type": "string",
-            "description": "The full contributor analysis in markdown format",
-        }
-    },
-    "required": ["text"],
-}
+from constants.contributor_analysis_constants import (
+    CONTRIBUTOR_ANALYSIS_SCHEMA,
+    get_contributor_analysis_prompt_intro,
+)
 
 
 class ContributorAnalysisWorkflow():
@@ -61,13 +54,7 @@ class ContributorAnalysisWorkflow():
 
         thread = threading.Thread(target=_print_elapsed, daemon=True)
         thread.start()
-        prompt = """
-            Given the following files and the contributor list for each file, write an analysis containing the following:
-                -  List all the engineers who has contributed to this repository, sort the engineers by number of commits descending.
-                    - For each contributor, list their name, account(s), and a high-level summary of their contributions.
-                    - If different accounts or names point to the same contributor, consolidate them.
-            Input:
-            """
+        prompt = get_contributor_analysis_prompt_intro()
         for file, file_contributors in state['contributors'].items():
             prompt += f"""
             \n
