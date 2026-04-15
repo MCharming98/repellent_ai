@@ -4,16 +4,16 @@
 
 ## Entry Point
 
-The main entry point is `src/main.py`. Configure `config.yaml` at the repository root (see that file for `repository`, model settings, and API key / env vars). Analysis outputs are always written under `domain_knowledge/<project_name>/` (relative to the current working directory).
+The main entry point is `src/main.py`. Configure `config.yaml` at the repository root (model settings and API key / env vars). Pass the repository path on the command line. Analysis outputs are always written under `domain_knowledge/<project_name>/` (relative to the current working directory).
 
 ```bash
-PYTHONPATH=src python src/main.py onboard
+PYTHONPATH=src python src/main.py onboard --repository projects/AntennaPod
 ```
 
 With a `main` launcher in your `PATH` (or `python main.py onboard` if you name the entry script `main.py`):
 
 ```bash
-python main onboard
+python main onboard --repository projects/AntennaPod
 ```
 
 ## Architecture

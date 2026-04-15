@@ -1,8 +1,5 @@
 # Repellent AI — main entry.
 #
-# repository: path to the source repository to analyze (required).
-repository: projects/AntennaPod
-
 # Batch size for file analysis (FileAnalyzer batches).
 file_analysis_batch_size: 10
 

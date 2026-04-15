@@ -6,18 +6,27 @@ if __name__ == "__main__":
 
 import argparse
 import asyncio
+import json
+import os
+import urllib.error
+import urllib.request
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from agents.hypothesis_generator import HypothesisGenerator
 from agents.hypothesis_investigator import HypothesisInvestigator
+from utils import fetch_issue_comments, parse_github_issue_url, save_issue_details_to_json
 
 
 class BugAnalysisWorkflow:
-    """Generate hypotheses into ``diagnosis.md``, then run one hypothesis investigator on it."""
+    """Fetch one issue by URL, generate diagnosis, then run hypothesis investigation."""
 
     class State(TypedDict):
+        issue_url: str
+        owner: str
+        repo: str
+        issue_number: int
         issue_dir: str
         source_dir: str
         domain_knowledge_dir: str
@@ -27,20 +36,70 @@ class BugAnalysisWorkflow:
 
     def __init__(
         self,
-        issue_dir: str,
+        issue_url: str,
+        output_dir: str,
         source_dir: str,
         domain_knowledge_dir: str,
         model: str,
         model_provider: str,
         api_key: str,
     ) -> None:
-        self.issue_dir = str(Path(issue_dir).resolve())
+        self.issue_url = issue_url
+        self.output_dir = output_dir
         self.source_dir = str(Path(source_dir).resolve())
         self.domain_knowledge_dir = str(Path(domain_knowledge_dir).resolve())
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
         self.workflow = None
+
+    def parse_issue_url(self, state: State) -> dict:
+        owner, repo, issue_number = parse_github_issue_url(state["issue_url"])
+        issue_dir = Path(self.output_dir) / repo / str(issue_number)
+        print(
+            f"Bug Analysis Workflow: parsed issue {owner}/{repo}#{issue_number}, "
+            f"output dir: {issue_dir}"
+        )
+        return {
+            "owner": owner,
+            "repo": repo,
+            "issue_number": issue_number,
+            "issue_dir": str(issue_dir.resolve()),
+        }
+
+    def fetch_issue_metadata(self, state: State) -> dict:
+        owner = state["owner"]
+        repo = state["repo"]
+        issue_number = state["issue_number"]
+        issue_api = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}"
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Repellent-AI",
+        }
+        token = os.getenv("GITHUB_TOKEN", "")
+        if token:
+            headers["Authorization"] = f"token {token}"
+        req = urllib.request.Request(issue_api, headers=headers)
+        try:
+            with urllib.request.urlopen(req) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"Issue metadata request failed: {e.code} {e.reason}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Issue metadata request failed: {e.reason}") from e
+
+        title = payload.get("title", "")
+        body = payload.get("body", "")
+        comments = fetch_issue_comments(owner, repo, issue_number)
+        issue_dir = Path(state["issue_dir"])
+        issue_dir.mkdir(parents=True, exist_ok=True)
+        details_path = issue_dir / "issue_details.json"
+        save_issue_details_to_json(title, body, comments, str(details_path))
+        print(
+            "Bug Analysis Workflow: saved issue details with "
+            f"{len(comments)} comments to {details_path}"
+        )
+        return {}
 
     def run_hypothesis_generator(self, state: State) -> dict:
         issue_dir = Path(state["issue_dir"])
@@ -74,10 +133,14 @@ class BugAnalysisWorkflow:
 
     def build_workflow(self) -> None:
         workflow = StateGraph(self.State)
+        workflow.add_node("parse_issue_url", self.parse_issue_url)
+        workflow.add_node("fetch_issue_metadata", self.fetch_issue_metadata)
         workflow.add_node("run_hypothesis_generator", self.run_hypothesis_generator)
         workflow.add_node("run_hypothesis_investigator", self.run_hypothesis_investigator)
 
-        workflow.add_edge(START, "run_hypothesis_generator")
+        workflow.add_edge(START, "parse_issue_url")
+        workflow.add_edge("parse_issue_url", "fetch_issue_metadata")
+        workflow.add_edge("fetch_issue_metadata", "run_hypothesis_generator")
         workflow.add_edge("run_hypothesis_generator", "run_hypothesis_investigator")
         workflow.add_edge("run_hypothesis_investigator", END)
         self.workflow = workflow.compile()
@@ -87,7 +150,7 @@ class BugAnalysisWorkflow:
             self.build_workflow()
         self.workflow.invoke(
             {
-                "issue_dir": self.issue_dir,
+                "issue_url": self.issue_url,
                 "source_dir": self.source_dir,
                 "domain_knowledge_dir": self.domain_knowledge_dir,
                 "model": self.model,
@@ -99,13 +162,18 @@ class BugAnalysisWorkflow:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run bug analysis workflow for one issue directory"
+        description="Run bug analysis workflow for one GitHub issue URL"
     )
     parser.add_argument(
-        "--issue-dir",
-        dest="issue_dir",
+        "--issue-url",
+        dest="issue_url",
         required=True,
-        help="Path to issue directory containing issue_details.json",
+        help="GitHub issue URL (e.g. https://github.com/owner/repo/issues/123)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="issues",
+        help="Base directory to store fetched issue details (default: issues)",
     )
     parser.add_argument(
         "--source-dir",
@@ -134,7 +202,8 @@ def main() -> None:
     args = parser.parse_args()
 
     workflow = BugAnalysisWorkflow(
-        issue_dir=args.issue_dir,
+        issue_url=args.issue_url,
+        output_dir=args.output_dir,
         source_dir=args.source_dir,
         domain_knowledge_dir=args.domain_knowledge_dir,
         model=args.model,

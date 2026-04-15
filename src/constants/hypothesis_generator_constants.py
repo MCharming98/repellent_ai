@@ -102,7 +102,7 @@ def get_hypothesis_generator_prompt(
                 - Explain your rationale in one sentence.
                 - Assign your issue type analysis a confidence score.
             4. Diagnose Hypothesis and Investigation Actions
-                - List up to 5 hypotheses that are mutually distinct in root cause, not variations of the same issue.
+                - List up to 3 hypotheses that are mutually distinct in root cause, not variations of the same issue.
                 - For each hypothesis, provide the following:
                     1. Mechanism analysis:
                         - A step-by-step causal chain explaining how the system transitions from a correct state to the observed failure.

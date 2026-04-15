@@ -306,7 +306,7 @@ class HypothesisGenerator:
 
     def load_project_knowledge(self, state: State) -> dict:
         """Load project knowledge from agent workspace (file_analysis, business_analysis, contributor_analysis)."""
-        workspace = Path(state["agent_workspace"])
+        workspace = Path(state["domain_knowledge"])
         file_analysis = read_file(str(workspace / "file_analysis.md"))
         business_analysis = read_file(str(workspace / "business_analysis.md"))
         contributor_analysis = read_file(str(workspace / "contributor_analysis.md"))
