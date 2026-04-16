@@ -1,7 +1,6 @@
 """Git and GitHub operations."""
 
 import json
-import os
 import re
 import subprocess
 import urllib.error
@@ -254,13 +253,13 @@ def fetch_issue_comments(
         repo: Repository name.
         issue_number: Issue number.
         per_page: Number of comments per page (max 100).
-        token: GitHub API token. Uses GITHUB_TOKEN env var if not provided.
+        token: GitHub API token (optional; unauthenticated if omitted or empty).
 
     Returns:
         List of comment dicts with user.login and body.
     """
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments"
-    api_token = token or os.getenv("GITHUB_TOKEN", "")
+    api_token = token or ""
 
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -356,13 +355,13 @@ def get_closed_issues(
         state: Issue state (default: "closed").
         per_page: Number of issues per page (max 100).
         max_issues: Maximum number of issues to fetch (None for all).
-        token: GitHub API token. Uses GITHUB_TOKEN env var if not provided.
+        token: GitHub API token (optional; unauthenticated if omitted or empty).
 
     Returns:
         List of issue dictionaries.
     """
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues"
-    api_token = token or os.getenv("GITHUB_TOKEN", "")
+    api_token = token or ""
 
     headers = {
         "Accept": "application/vnd.github.v3+json",

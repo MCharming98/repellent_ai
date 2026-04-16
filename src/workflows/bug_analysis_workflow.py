@@ -7,7 +7,6 @@ if __name__ == "__main__":
 import argparse
 import asyncio
 import json
-import os
 import urllib.error
 import urllib.request
 from typing_extensions import TypedDict
@@ -16,6 +15,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agents.hypothesis_generator import HypothesisGenerator
 from agents.hypothesis_investigator import HypothesisInvestigator
+from utils.config import default_config_path, load_config, require_github_token
 from utils import fetch_issue_comments, parse_github_issue_url, save_issue_details_to_json
 
 
@@ -33,6 +33,7 @@ class BugAnalysisWorkflow:
         model: str
         model_provider: str
         api_key: str
+        github_token: str
 
     def __init__(
         self,
@@ -43,6 +44,7 @@ class BugAnalysisWorkflow:
         model: str,
         model_provider: str,
         api_key: str,
+        github_token: str = "",
     ) -> None:
         self.issue_url = issue_url
         self.output_dir = output_dir
@@ -51,6 +53,7 @@ class BugAnalysisWorkflow:
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
+        self.github_token = github_token
         self.workflow = None
 
     def parse_issue_url(self, state: State) -> dict:
@@ -76,7 +79,7 @@ class BugAnalysisWorkflow:
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "Repellent-AI",
         }
-        token = os.getenv("GITHUB_TOKEN", "")
+        token = state["github_token"]
         if token:
             headers["Authorization"] = f"token {token}"
         req = urllib.request.Request(issue_api, headers=headers)
@@ -90,7 +93,9 @@ class BugAnalysisWorkflow:
 
         title = payload.get("title", "")
         body = payload.get("body", "")
-        comments = fetch_issue_comments(owner, repo, issue_number)
+        comments = fetch_issue_comments(
+            owner, repo, issue_number, token=state["github_token"] or None
+        )
         issue_dir = Path(state["issue_dir"])
         issue_dir.mkdir(parents=True, exist_ok=True)
         details_path = issue_dir / "issue_details.json"
@@ -156,6 +161,7 @@ class BugAnalysisWorkflow:
                 "model": self.model,
                 "model_provider": self.model_provider,
                 "api_key": self.api_key,
+                "github_token": self.github_token,
             }
         )
 
@@ -201,6 +207,8 @@ def main() -> None:
     parser.add_argument("--api-key", required=True, help="API key for LLM provider")
     args = parser.parse_args()
 
+    github_token = require_github_token(load_config(default_config_path()))
+
     workflow = BugAnalysisWorkflow(
         issue_url=args.issue_url,
         output_dir=args.output_dir,
@@ -209,6 +217,7 @@ def main() -> None:
         model=args.model,
         model_provider=args.model_provider,
         api_key=args.api_key,
+        github_token=github_token,
     )
     workflow.run()
 

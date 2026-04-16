@@ -6,6 +6,8 @@ file_analysis_batch_size: 10
 model_name: gemini-3-flash-preview
 model_provider: google_genai
 
-# API key: paste the key directly, or reference an env var with $VAR_NAME or ${VAR_NAME}
-# (e.g. api_key: $GEMINI_API_KEY). If empty/unset, LLM_API_KEY / GOOGLE_API_KEY are used.
+# API key: literal, or exactly $VAR_NAME / ${VAR_NAME} to read that environment variable.
 api_key: $GEMINI_API_KEY
+
+# GitHub API token for issue/comment requests (same rules as api_key). 
+github_token: $GITHUB_TOKEN

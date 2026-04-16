@@ -1,72 +1,28 @@
 import argparse
-import os
-import re
 import sys
 from pathlib import Path
 
-import yaml
-
+from utils.config import (
+    default_config_path,
+    load_config,
+    load_runtime_settings,
+    require_api_key,
+)
 from workflows.bug_analysis_workflow import BugAnalysisWorkflow
 from workflows.onboarding_workflow import OnboardingWorkflow
 from utils import parse_github_issue_url
 
 
-def _default_config_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "config.yaml"
-
-
-# `api_key: $VAR_NAME` or `api_key: ${VAR_NAME}` reads from the process environment.
-_ENV_VAR_REF = re.compile(
-    r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$"
-)
-
-
-def _resolve_api_key_from_config(raw: object) -> str:
-    """Return API key string: literal value, or env lookup for ``$VAR`` / ``${VAR}``."""
-    if raw is None:
-        return ""
-    if not isinstance(raw, str):
-        return str(raw).strip()
-    s = raw.strip()
-    if not s:
-        return ""
-    m = _ENV_VAR_REF.match(s)
-    if m:
-        name = m.group(1) or m.group(2)
-        return os.environ.get(name, "")
-    return s
-
-
-def _load_config(path: Path) -> dict:
-    if not path.is_file():
-        print(f"Error: config file not found: {path}", file=sys.stderr)
-        sys.exit(1)
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if not isinstance(data, dict):
-        print(f"Error: config must be a YAML mapping: {path}", file=sys.stderr)
-        sys.exit(1)
-    return data
-
-
 def _run_onboard(repository: str) -> None:
-    cfg = _load_config(_default_config_path())
-
-    api_key = _resolve_api_key_from_config(cfg.get("api_key"))
-    if not api_key:
-        print(
-            "Error: set `api_key` in config.yaml (literal or $VAR / ${VAR}), "
-            "or LLM_API_KEY / GOOGLE_API_KEY in the environment.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    cfg = load_config(default_config_path())
+    api_key = require_api_key(cfg)
+    model_name = str(cfg.get("model_name", "gemini-3-flash-preview"))
+    model_provider = str(cfg.get("model_provider", "google_genai"))
 
     project_name = Path(repository).resolve().name
     domain_knowledge_dir = f"domain_knowledge/{project_name}"
 
     batch_size = int(cfg.get("file_analysis_batch_size", 10))
-    model_name = cfg.get("model_name", "gemini-3-flash-preview")
-    model_provider = cfg.get("model_provider", "google_genai")
 
     onboarding_workflow = OnboardingWorkflow(
         source_repository=repository,
@@ -80,24 +36,6 @@ def _run_onboard(repository: str) -> None:
     onboarding_workflow.run()
 
 
-def _load_runtime_settings() -> tuple[str, str, str]:
-    """Load model/provider/api key from config + env fallbacks."""
-    cfg = _load_config(_default_config_path())
-    api_key = _resolve_api_key_from_config(cfg.get("api_key"))
-    if not api_key:
-        api_key = os.environ.get("LLM_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
-    if not api_key:
-        print(
-            "Error: set `api_key` in config.yaml (literal or $VAR / ${VAR}), "
-            "or LLM_API_KEY / GOOGLE_API_KEY in the environment.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    model_name = cfg.get("model_name", "gemini-3-flash-preview")
-    model_provider = cfg.get("model_provider", "google_genai")
-    return model_name, model_provider, api_key
-
-
 def _run_analyze(
     issue_url: str,
     source_dir: str | None,
@@ -108,7 +46,8 @@ def _run_analyze(
     _, repo, _ = parse_github_issue_url(issue_url)
     source = source_dir or f"projects/{repo}"
     domain_knowledge = domain_knowledge_dir or f"domain_knowledge/{repo}"
-    model_name, model_provider, api_key = _load_runtime_settings()
+    cfg = load_config(default_config_path())
+    model_name, model_provider, api_key, github_token = load_runtime_settings(cfg)
 
     workflow = BugAnalysisWorkflow(
         issue_url=issue_url,
@@ -118,6 +57,7 @@ def _run_analyze(
         model=model_name,
         model_provider=model_provider,
         api_key=api_key,
+        github_token=github_token,
     )
     workflow.build_workflow()
     workflow.run()
