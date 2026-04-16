@@ -61,6 +61,79 @@ def parse_github_repo_url(url: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def _github_clone_url(url: str) -> str:
+    """Normalize a GitHub repo URL or web path into an ``https`` clone URL ending in ``.git``."""
+    s = url.strip().rstrip("/")
+    if not s:
+        raise ValueError("Repository URL is empty")
+    if s.startswith("git@github.com:"):
+        return s if s.endswith(".git") else s + ".git"
+    parsed = parse_github_repo_url(s)
+    if parsed:
+        owner, repo = parsed
+        return f"https://github.com/{owner}/{repo}.git"
+    if "github.com" in s:
+        if not s.startswith(("http://", "https://")):
+            s = "https://" + s
+        return s if s.endswith(".git") else s + ".git"
+    raise ValueError(f"Unrecognized GitHub repository URL: {url!r}")
+
+
+def checkout(commit_hash: str) -> None:
+    """
+    Check out a git ref in the current working directory.
+
+    Args:
+        commit_hash: Git ref to check out (branch, tag, or SHA).
+
+    Raises:
+        RuntimeError: If ``git checkout`` fails.
+    """
+    ref = commit_hash.strip()
+    if not ref:
+        return
+
+    checkout_process = subprocess.run(
+        ["git", "checkout", ref],
+        capture_output=True,
+        text=True,
+    )
+    if checkout_process.returncode != 0:
+        err = (checkout_process.stderr or checkout_process.stdout or "").strip()
+        raise RuntimeError(f"git checkout {ref!r} failed: {err}")
+
+
+def clone_github_repo(url: str, path: str) -> None:
+    """
+    Clone a GitHub repository into ``path``.
+
+    Args:
+        url: Repository URL or GitHub web path (https, ``git@github.com:...``, or ``owner/repo``-style).
+        path: Destination directory for the clone (must not exist or must be empty).
+    Raises:
+        ValueError: If ``url`` cannot be turned into a clone URL.
+        FileExistsError: If ``path`` exists and is not an empty directory.
+        RuntimeError: If ``git clone`` fails.
+    """
+    target = Path(path).expanduser().resolve()
+    if target.exists():
+        if target.is_file() or any(target.iterdir()):
+            raise FileExistsError(f"Clone destination exists and is not empty: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    clone_url = _github_clone_url(url)
+    clone = subprocess.run(
+        ["git", "clone", clone_url, str(target)],
+        capture_output=True,
+        text=True,
+    )
+    if clone.returncode != 0:
+        err = (clone.stderr or clone.stdout or "").strip()
+        raise RuntimeError(f"git clone failed: {err}")
+
+    return
+
+
 def extract_issue_fields(
     issues: Union[List[Dict[str, Any]], str, Path],
 ) -> List[Dict[str, Any]]:

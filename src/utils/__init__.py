@@ -15,6 +15,7 @@ from .files import (
     write_to_file,
 )
 from .git import (
+    clone_github_repo,
     extract_github_user_attachment_links,
     extract_image_markdown,
     extract_issue_fields,
@@ -31,6 +32,7 @@ from .git import (
 from .text import format_key_to_subheading
 
 __all__ = [
+    'clone_github_repo',
     'extract_github_user_attachment_links',
     'extract_image_markdown',
     'fetch_image_as_data_url',
