@@ -1,7 +1,7 @@
 import threading
 import time
 from pathlib import PurePath
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
@@ -12,6 +12,7 @@ from constants.contributor_analysis_constants import (
     CONTRIBUTOR_ANALYSIS_SCHEMA,
     get_contributor_analysis_prompt_intro,
 )
+from utils.langchain import aggregate_token_usage_from_messages, merge_token_usage_totals
 
 
 class ContributorAnalysisWorkflow():
@@ -28,6 +29,7 @@ class ContributorAnalysisWorkflow():
         contributors: dict[str, list[str]]
         contributor_analysis: str
         write_directory: str
+        token_usage: NotRequired[dict[str, int]]
 
     # Nodes
     def list_source_code_files(self, state: State):
@@ -77,11 +79,17 @@ class ContributorAnalysisWorkflow():
         thread.join()
         elapsed = time.perf_counter() - start_time
         print(f"\rContributor Analysis Workflow: Generating contributor analysis completed in {elapsed:.2f}s")
-        return {"contributor_analysis": result["structured_response"]["text"]}
+        usage = aggregate_token_usage_from_messages(result.get("messages") or [])
+        token_usage = merge_token_usage_totals(None, usage)
+        return {
+            "contributor_analysis": result["structured_response"]["text"],
+            "token_usage": token_usage,
+        }
 
     def write_analysis_to_file(self, state: State):
         print(f"Contributor Analysis Workflow: Writing contributor analysis to {state['write_directory']}contributor_analysis.md")
         write_to_file(str(PurePath(state["write_directory"], "contributor_analysis.md")), state["contributor_analysis"], 'w')
+        return {}
 
     def build_workflow(self):
         # Build workflow

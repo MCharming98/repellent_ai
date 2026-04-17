@@ -1,7 +1,8 @@
 import time
 from pathlib import PurePath
 from typing import List
-from typing_extensions import TypedDict
+
+from typing_extensions import NotRequired, TypedDict
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
@@ -9,6 +10,7 @@ from utils import *
 from langchain.agents.structured_output import ToolStrategy
 
 from constants.file_analyzer_constants import FILE_ANALYSIS_SCHEMA, get_file_analyzer_prompt_header
+from utils.langchain import aggregate_token_usage_from_messages, merge_token_usage_totals
 
 class FileAnalyzer:
     def __init__(self, id: str, read_directory: str, files: List[str], write_directory: str, model: str, model_provider: str, api_key: str):
@@ -31,6 +33,7 @@ class FileAnalyzer:
         source_code_files: list[str]
         file_analysis: dict[str, str]
         write_status: bool
+        token_usage: NotRequired[dict[str, int]]
 
     def analyze_files(self, state: State):
         start_time = time.perf_counter()
@@ -38,6 +41,11 @@ class FileAnalyzer:
         file_analysis = {}
         source_files = state['source_code_files']
         batch_size = len(source_files)
+        token_usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
 
         for batch_start in range(0, len(source_files), batch_size):
             batch = source_files[batch_start : batch_start + batch_size]
@@ -57,6 +65,9 @@ class FileAnalyzer:
             result = self.agent.invoke(
                 {"messages": [{"role": "user", "content": prompt}]}
             )
+            usage = aggregate_token_usage_from_messages(result.get("messages") or [])
+            if usage:
+                token_usage = merge_token_usage_totals(token_usage, usage)
             for file in result["structured_response"]["files"]:
                 file_path = file.get("file_path", "")
                 if "file_contributors" not in file:
@@ -68,7 +79,7 @@ class FileAnalyzer:
                 file_analysis[file_path] = file_contributors + "\n" + file_analysis_content
         elapsed = time.perf_counter() - start_time
         print(f"\nFile analyzer #{self.id}: completed in {elapsed:.2f}s")
-        return {"file_analysis": file_analysis}
+        return {"file_analysis": file_analysis, "token_usage": token_usage}
 
     def write_analysis_to_file(self, state: State):
         print(f"File analyzer #{self.id}: writing {len(state['file_analysis'])} file analysis to {state['write_directory']}")
@@ -77,7 +88,7 @@ class FileAnalyzer:
         for file_path, analysis in file_analysis.items():
             output_path = PurePath(write_directory, "file_analysis.md")
             write_to_file(str(output_path), f"{file_path}\n{analysis}\n\n", 'a')
-        return {"write_status": True}
+        return {"write_status": True, "token_usage": state.get("token_usage", {})}
 
     def build_workflow(self):
         # print(f"Agent {self.id}: build workflow")

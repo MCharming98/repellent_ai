@@ -4,6 +4,7 @@ from typing import Any
 
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
+from langchain_core.messages import AIMessage
 
 # Built-in web search tools per provider (LangChain + provider docs).
 _GEMINI_GOOGLE_SEARCH_TOOL = [{"google_search": {}}]
@@ -60,3 +61,51 @@ def get_llm_agent(
             chat_model = chat_model.bind_tools(tools)
 
     return create_agent(model=chat_model, **create_agent_kwargs)
+
+
+def aggregate_token_usage_from_messages(messages: list[Any]) -> dict[str, int] | None:
+    """
+    Sum token counts from ``AIMessage.usage_metadata`` across agent steps (if present).
+    """
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    found = False
+    for msg in messages or []:
+        if not isinstance(msg, AIMessage):
+            continue
+        um = getattr(msg, "usage_metadata", None)
+        if not isinstance(um, dict) or not um:
+            continue
+        found = True
+        it = um.get("input_tokens")
+        ot = um.get("output_tokens")
+        tt = um.get("total_tokens")
+        if it is not None:
+            input_tokens += int(it)
+        if ot is not None:
+            output_tokens += int(ot)
+        if tt is not None:
+            total_tokens += int(tt)
+    if not found:
+        return None
+    if total_tokens == 0 and (input_tokens or output_tokens):
+        total_tokens = input_tokens + output_tokens
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def merge_token_usage_totals(
+    current: dict[str, int] | None,
+    delta: dict[str, int] | None,
+) -> dict[str, int]:
+    """Sum two usage dicts (``input_tokens``, ``output_tokens``, ``total_tokens``)."""
+    keys = ("input_tokens", "output_tokens", "total_tokens")
+    out = {k: int((current or {}).get(k, 0)) for k in keys}
+    if delta:
+        for k in keys:
+            out[k] += int(delta.get(k, 0))
+    return out

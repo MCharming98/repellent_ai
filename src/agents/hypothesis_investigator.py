@@ -12,7 +12,7 @@ if __name__ == "__main__":
     # Allow direct execution: python src/agents/hypothesis_investigator.py
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from langchain.agents.structured_output import ToolStrategy
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 

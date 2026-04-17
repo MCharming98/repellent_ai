@@ -1,7 +1,7 @@
 import threading
 import time
 from pathlib import PurePath
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
@@ -12,6 +12,7 @@ from constants.business_analysis_constants import (
     BUSINESS_ANALYSIS_SCHEMA,
     get_business_analysis_prompt,
 )
+from utils.langchain import aggregate_token_usage_from_messages, merge_token_usage_totals
 
 
 class BusinessAnalysisWorkflow():
@@ -26,6 +27,7 @@ class BusinessAnalysisWorkflow():
         read_directory: str
         business_analysis: str
         write_directory: str
+        token_usage: NotRequired[dict[str, int]]
 
     # Nodes
     def generate_business_analysis(self, state: State):
@@ -54,12 +56,18 @@ class BusinessAnalysisWorkflow():
         thread.join()
         elapsed = time.perf_counter() - start_time
         print(f"\rBusiness Analysis Workflow: Generating analysis completed in {elapsed:.2f}s")
-        return {"business_analysis": result["structured_response"]["text"]}
+        usage = aggregate_token_usage_from_messages(result.get("messages") or [])
+        token_usage = merge_token_usage_totals(None, usage)
+        return {
+            "business_analysis": result["structured_response"]["text"],
+            "token_usage": token_usage,
+        }
 
     def write_analysis_to_file(self, state: State):
         print(f"Business Analysis Workflow: Writing analysis to {state['write_directory']}/business_analysis.md")
         output_path = PurePath(state["write_directory"], "business_analysis.md")
         write_to_file(str(output_path), state["business_analysis"], 'w')
+        return {}
 
     def build_workflow(self):
         # Build workflow
