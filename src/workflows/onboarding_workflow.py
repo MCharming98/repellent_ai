@@ -4,6 +4,7 @@ from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
 from utils import *
+from utils.langchain import merge_token_usage_totals
 
 from .business_analysis_workflow import BusinessAnalysisWorkflow
 from .contributor_analysis_workflow import ContributorAnalysisWorkflow
@@ -84,6 +85,22 @@ class OnboardingWorkflow:
         print(f"Onboarding Workflow: File Analysis Status: {state['file_analysis_workflow'].status}")
         print(f"Onboarding Workflow: Business Analysis Status: {state['business_analysis_workflow'].status}")
         print(f"Onboarding Workflow: Contributor Analysis Status: {state['contributor_analysis_workflow'].status}")
+        fa = state["file_analysis_workflow"].token_usage
+        bu = state["business_analysis_workflow"].token_usage
+        co = state["contributor_analysis_workflow"].token_usage
+        print(
+            "Onboarding Workflow: Token usage by stage — "
+            f"file_analysis: in={fa['input_tokens']} out={fa['output_tokens']} total={fa['total_tokens']}; "
+            f"business_analysis: in={bu['input_tokens']} out={bu['output_tokens']} total={bu['total_tokens']}; "
+            f"contributor_analysis: in={co['input_tokens']} out={co['output_tokens']} total={co['total_tokens']}"
+        )
+        agg = merge_token_usage_totals(None, fa)
+        agg = merge_token_usage_totals(agg, bu)
+        agg = merge_token_usage_totals(agg, co)
+        print(
+            "Onboarding Workflow: Aggregated token usage — "
+            f"input={agg['input_tokens']} output={agg['output_tokens']} total={agg['total_tokens']}"
+        )
         print("Onboarding Workflow: Completed")
 
     def build_workflow(self):

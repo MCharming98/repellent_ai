@@ -22,6 +22,11 @@ class BusinessAnalysisWorkflow():
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
+        self.token_usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
 
     class State(TypedDict):
         read_directory: str
@@ -84,8 +89,10 @@ class BusinessAnalysisWorkflow():
 
     async def run(self):
         print(f"Business Analysis Workflow: Run workflow")
-        await self.workflow.ainvoke({
+        final = await self.workflow.ainvoke({
             "read_directory": self.read_directory,
             "write_directory": self.write_directory,
         })
+        tu = final.get("token_usage") if isinstance(final, dict) else None
+        self.token_usage = merge_token_usage_totals(None, tu)
         self.status = True

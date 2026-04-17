@@ -1,12 +1,13 @@
 import asyncio
 import threading
 import time
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from agents.file_analyzer import FileAnalyzer
 from utils import *
+from utils.langchain import merge_token_usage_totals
 
 
 class FileAnalysisWorkflow:
@@ -17,6 +18,11 @@ class FileAnalysisWorkflow:
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
+        self.token_usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
 
     class State(TypedDict):
         read_directory: str
@@ -27,6 +33,7 @@ class FileAnalysisWorkflow:
         api_key: str
         source_code_files: list[str]
         agents: list[FileAnalyzer]
+        token_usage: NotRequired[dict[str, int]]
 
     # Nodes
     def list_source_code_files(self, state: State):
@@ -67,15 +74,19 @@ class FileAnalysisWorkflow:
         thread.start()
 
         async def _run():
-            run_tasks = [asyncio.create_task(agent.run()) for agent in state['agents']]
-            await asyncio.gather(*run_tasks)
+            results = await asyncio.gather(*[agent.run() for agent in state["agents"]])
+            merged = merge_token_usage_totals(None, None)
+            for r in results:
+                if isinstance(r, dict) and r.get("token_usage"):
+                    merged = merge_token_usage_totals(merged, r["token_usage"])
+            self.token_usage = merged
 
         asyncio.run(_run())
         stop_event.set()
         thread.join()
         elapsed = time.perf_counter() - start_time
         print(f"\rFile Analysis Workflow: Running {len(state['agents'])} agents completed in {elapsed:.2f}s")
-        return {"agents": state['agents']}
+        return {"agents": state["agents"], "token_usage": self.token_usage}
 
     def build_workflow(self):
         workflow = StateGraph(self.State)
