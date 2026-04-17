@@ -37,20 +37,38 @@ def _run_onboard(repository: str) -> None:
 
 
 def _run_analyze(
-    issue_url: str,
+    issue_url: str | None,
+    issue_path: str | None,
     source_dir: str | None,
     domain_knowledge_dir: str | None,
     output_dir: str,
 ) -> None:
-    """Run bug analysis for one GitHub issue URL."""
-    _, repo, _ = parse_github_issue_url(issue_url)
-    source = source_dir or f"projects/{repo}"
-    domain_knowledge = domain_knowledge_dir or f"domain_knowledge/{repo}"
+    """Run bug analysis from a GitHub issue URL or local issue directory path."""
     cfg = load_config(default_config_path())
     model_name, model_provider, api_key, github_token = load_runtime_settings(cfg)
 
+    if issue_path:
+        issue_dir = Path(issue_path).resolve()
+        if not issue_dir.is_dir():
+            print(f"Error: issue path is not a directory: {issue_dir}", file=sys.stderr)
+            sys.exit(1)
+        if not (issue_dir / "issue_details.json").is_file():
+            print(f"Error: missing issue_details.json in: {issue_dir}", file=sys.stderr)
+            sys.exit(1)
+        repo = issue_dir.parent.name
+        source = source_dir or f"projects/{repo}"
+        domain_knowledge = domain_knowledge_dir or f"domain_knowledge/{repo}"
+    else:
+        if not issue_url:
+            print("Error: one of --url or --path is required.", file=sys.stderr)
+            sys.exit(1)
+        _, repo, _ = parse_github_issue_url(issue_url)
+        source = source_dir or f"projects/{repo}"
+        domain_knowledge = domain_knowledge_dir or f"domain_knowledge/{repo}"
+
     workflow = BugAnalysisWorkflow(
-        issue_url=issue_url,
+        issue_url=issue_url or "",
+        issue_path=issue_path or "",
         output_dir=output_dir,
         source_dir=source,
         domain_knowledge_dir=domain_knowledge,
@@ -91,13 +109,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     analyze = sub.add_parser(
         "analyze",
-        help="Run bug analysis (generator + investigator) for a single GitHub issue URL.",
+        help="Run bug analysis from a GitHub issue URL or a local issue directory path.",
     )
-    analyze.add_argument(
+    issue_src = analyze.add_mutually_exclusive_group(required=True)
+    issue_src.add_argument(
         "--url",
-        required=True,
         dest="issue_url",
         help="GitHub issue URL (e.g. https://github.com/owner/repo/issues/123).",
+    )
+    issue_src.add_argument(
+        "--path",
+        dest="issue_path",
+        help="Local issue directory path (e.g. issues/AntennaPod/8311).",
     )
     analyze.add_argument(
         "--source-dir",
@@ -130,6 +153,7 @@ def main() -> None:
     if args.command == "analyze":
         _run_analyze(
             issue_url=args.issue_url,
+            issue_path=args.issue_path,
             source_dir=args.source_dir,
             domain_knowledge_dir=args.domain_knowledge_dir,
             output_dir=args.output_dir,

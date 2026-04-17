@@ -37,7 +37,10 @@ htmlcov/
 Thumbs.db
 
 # Outputs
-agent_workspace/
+domain_knowledge/
 projects/
 issues/
 archive/
+
+# SWE-bench
+SWE-bench/

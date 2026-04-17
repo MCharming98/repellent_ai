@@ -24,6 +24,7 @@ class BugAnalysisWorkflow:
 
     class State(TypedDict):
         issue_url: str
+        issue_path: str
         owner: str
         repo: str
         issue_number: int
@@ -37,7 +38,8 @@ class BugAnalysisWorkflow:
 
     def __init__(
         self,
-        issue_url: str,
+        issue_url: str | None,
+        issue_path: str | None,
         output_dir: str,
         source_dir: str,
         domain_knowledge_dir: str,
@@ -46,7 +48,8 @@ class BugAnalysisWorkflow:
         api_key: str,
         github_token: str = "",
     ) -> None:
-        self.issue_url = issue_url
+        self.issue_url = issue_url or ""
+        self.issue_path = issue_path or ""
         self.output_dir = output_dir
         self.source_dir = str(Path(source_dir).resolve())
         self.domain_knowledge_dir = str(Path(domain_knowledge_dir).resolve())
@@ -55,6 +58,19 @@ class BugAnalysisWorkflow:
         self.api_key = api_key
         self.github_token = github_token
         self.workflow = None
+
+    def _entrypoint(self, state: State) -> str:
+        return "load_issue_path" if state.get("issue_path") else "parse_issue_url"
+
+    def load_issue_path(self, state: State) -> dict:
+        issue_dir = Path(state["issue_path"]).resolve()
+        if not issue_dir.is_dir():
+            raise ValueError(f"Issue path is not a directory: {issue_dir}")
+        details_path = issue_dir / "issue_details.json"
+        if not details_path.is_file():
+            raise ValueError(f"Missing issue_details.json in {issue_dir}")
+        print(f"Bug Analysis Workflow: using local issue path {issue_dir}")
+        return {"issue_dir": str(issue_dir)}
 
     def parse_issue_url(self, state: State) -> dict:
         owner, repo, issue_number = parse_github_issue_url(state["issue_url"])
@@ -138,12 +154,21 @@ class BugAnalysisWorkflow:
 
     def build_workflow(self) -> None:
         workflow = StateGraph(self.State)
+        workflow.add_node("load_issue_path", self.load_issue_path)
         workflow.add_node("parse_issue_url", self.parse_issue_url)
         workflow.add_node("fetch_issue_metadata", self.fetch_issue_metadata)
         workflow.add_node("run_hypothesis_generator", self.run_hypothesis_generator)
         workflow.add_node("run_hypothesis_investigator", self.run_hypothesis_investigator)
 
-        workflow.add_edge(START, "parse_issue_url")
+        workflow.add_conditional_edges(
+            START,
+            self._entrypoint,
+            {
+                "load_issue_path": "load_issue_path",
+                "parse_issue_url": "parse_issue_url",
+            },
+        )
+        workflow.add_edge("load_issue_path", "run_hypothesis_generator")
         workflow.add_edge("parse_issue_url", "fetch_issue_metadata")
         workflow.add_edge("fetch_issue_metadata", "run_hypothesis_generator")
         workflow.add_edge("run_hypothesis_generator", "run_hypothesis_investigator")
@@ -156,6 +181,7 @@ class BugAnalysisWorkflow:
         self.workflow.invoke(
             {
                 "issue_url": self.issue_url,
+                "issue_path": self.issue_path,
                 "source_dir": self.source_dir,
                 "domain_knowledge_dir": self.domain_knowledge_dir,
                 "model": self.model,
@@ -173,8 +199,14 @@ def main() -> None:
     parser.add_argument(
         "--issue-url",
         dest="issue_url",
-        required=True,
+        required=False,
         help="GitHub issue URL (e.g. https://github.com/owner/repo/issues/123)",
+    )
+    parser.add_argument(
+        "--issue-path",
+        dest="issue_path",
+        required=False,
+        help="Local issue directory path (e.g. issues/AntennaPod/8311)",
     )
     parser.add_argument(
         "--output-dir",
@@ -207,10 +239,14 @@ def main() -> None:
     parser.add_argument("--api-key", required=True, help="API key for LLM provider")
     args = parser.parse_args()
 
+    if not args.issue_url and not args.issue_path:
+        parser.error("one of --issue-url or --issue-path is required")
+
     github_token = require_github_token(load_config(default_config_path()))
 
     workflow = BugAnalysisWorkflow(
-        issue_url=args.issue_url,
+        issue_url=args.issue_url or "",
+        issue_path=args.issue_path,
         output_dir=args.output_dir,
         source_dir=args.source_dir,
         domain_knowledge_dir=args.domain_knowledge_dir,
