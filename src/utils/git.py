@@ -84,6 +84,7 @@ def checkout(commit_hash: str) -> None:
 
     Args:
         commit_hash: Git ref to check out (branch, tag, or SHA).
+            Special input ``latest`` runs ``git switch -``.
 
     Raises:
         RuntimeError: If ``git checkout`` fails.
@@ -92,11 +93,18 @@ def checkout(commit_hash: str) -> None:
     if not ref:
         return
 
-    checkout_process = subprocess.run(
-        ["git", "checkout", ref],
-        capture_output=True,
-        text=True,
-    )
+    if ref.lower() == "latest":
+        checkout_process = subprocess.run(
+            ["git", "switch", "-"],
+            capture_output=True,
+            text=True,
+        )
+    else:
+        checkout_process = subprocess.run(
+            ["git", "checkout", ref],
+            capture_output=True,
+            text=True,
+        )
     if checkout_process.returncode != 0:
         err = (checkout_process.stderr or checkout_process.stdout or "").strip()
         raise RuntimeError(f"git checkout {ref!r} failed: {err}")

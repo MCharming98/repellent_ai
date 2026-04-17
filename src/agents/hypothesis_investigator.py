@@ -20,7 +20,7 @@ from constants.hypothesis_investigator_constants import (
     INVESTIGATION_ANALYSIS_SCHEMA,
     get_hypothesis_investigator_prompt,
 )
-from utils import format_key_to_subheading, read_file, write_to_file
+from utils import checkout, format_key_to_subheading, read_file, write_to_file
 from utils.langchain import get_llm_agent
 from utils.tools import list_files_tool, list_source_files_recursive_tool, read_file_tool, write_to_file_tool 
 
@@ -138,6 +138,7 @@ class HypothesisInvestigator:
         model: str,
         model_provider: str,
         api_key: str,
+        commit_hash: str | None = None,
     ) -> None:
         self.issue_dir = issue_dir
         self.source_dir = source_dir
@@ -145,6 +146,7 @@ class HypothesisInvestigator:
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
+        self.commit_hash = commit_hash
 
         self.agent = get_llm_agent(
             model,
@@ -192,11 +194,16 @@ class HypothesisInvestigator:
         prev_cwd = os.getcwd()
         os.chdir(self.source_dir)
         try:
+            if self.commit_hash:
+                print(f"Hypothesis investigator: checking out commit {self.commit_hash}")
+                checkout(self.commit_hash)
             result = self.agent.invoke(
                 {"messages": [{"role": "user", "content": prompt}]}
             )
         finally:
             os.chdir(prev_cwd)
+            if self.commit_hash:
+                checkout("latest")
         elapsed = time.perf_counter() - start_time
         messages_for_usage = result.get("messages") or []
         usage = aggregate_token_usage_from_messages(messages_for_usage)
@@ -286,6 +293,11 @@ def main() -> None:
     parser.add_argument("--model", default="gemini-3-flash-preview")
     parser.add_argument("--model-provider", default="google_genai")
     parser.add_argument("--api-key", required=True)
+    parser.add_argument(
+        "--commit-hash",
+        default=None,
+        help="Optional commit hash/ref to checkout in --source-dir before analysis.",
+    )
     args = parser.parse_args()
 
     investigator = HypothesisInvestigator(
@@ -295,6 +307,7 @@ def main() -> None:
         model=args.model,
         model_provider=args.model_provider,
         api_key=args.api_key,
+        commit_hash=args.commit_hash,
     )
     investigator.build_workflow()
     asyncio.run(investigator.run())
