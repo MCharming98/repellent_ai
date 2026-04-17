@@ -1,6 +1,6 @@
 import time
 from pathlib import PurePath
-from typing import List
+from typing import Any, List
 
 from typing_extensions import NotRequired, TypedDict
 from langchain.agents import create_agent
@@ -11,6 +11,51 @@ from langchain.agents.structured_output import ToolStrategy
 
 from constants.file_analyzer_constants import FILE_ANALYSIS_SCHEMA, get_file_analyzer_prompt_header
 from utils.langchain import aggregate_token_usage_from_messages, merge_token_usage_totals
+
+
+def file_analysis_entry_to_markdown(entry: dict[str, Any]) -> str:
+    """
+    Render one ``FILE_ANALYSIS_SCHEMA`` file object (a single ``files[]`` item) as markdown.
+    """
+    lines: list[str] = []
+    fp = str(entry.get("file_path", "")).strip()
+    lines.append(f"## `{fp}`")
+    lines.append("")
+    summary = str(entry.get("file_summary", "")).strip()
+    lines.append("### Summary")
+    lines.append(summary if summary else "_N/A_")
+    lines.append("")
+    lines.append("### Contributors")
+    primary = str(entry.get("primary_contributor", "")).strip()
+    secondary = str(entry.get("secondary_contributor", "")).strip()
+    lines.append(f"- **Primary:** {primary if primary else '_N/A_'}")
+    if secondary:
+        lines.append(f"- **Secondary:** {secondary}")
+    lines.append("")
+    classes = entry.get("classes")
+    if isinstance(classes, list) and classes:
+        lines.append("### Classes")
+        for c in classes:
+            if not isinstance(c, dict):
+                continue
+            cn = str(c.get("class_name", "")).strip()
+            cs = str(c.get("class_summary", "")).strip()
+            if cn:
+                lines.append(f"- **`{cn}`**: {cs if cs else '_N/A_'}")
+        lines.append("")
+    functions = entry.get("functions")
+    if isinstance(functions, list) and functions:
+        lines.append("### Functions")
+        for fn in functions:
+            if not isinstance(fn, dict):
+                continue
+            name = str(fn.get("function_name", "")).strip()
+            fsum = str(fn.get("function_summary", "")).strip()
+            if name:
+                lines.append(f"- **`{name}`**: {fsum if fsum else '_N/A_'}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
 
 class FileAnalyzer:
     def __init__(self, id: str, read_directory: str, files: List[str], write_directory: str, model: str, model_provider: str, api_key: str):
@@ -68,15 +113,15 @@ class FileAnalyzer:
             usage = aggregate_token_usage_from_messages(result.get("messages") or [])
             if usage:
                 token_usage = merge_token_usage_totals(token_usage, usage)
-            for file in result["structured_response"]["files"]:
-                file_path = file.get("file_path", "")
-                if "file_contributors" not in file:
-                    print(f"Warning: File contributors missing for file {file_path}")
-                if "file_analysis" not in file:
-                    print(f"Warning: File analysis missing for file {file_path}")
-                file_contributors = file.get("file_contributors", "")
-                file_analysis_content = file.get("file_analysis", "")
-                file_analysis[file_path] = file_contributors + "\n" + file_analysis_content
+            structured = result.get("structured_response") or {}
+            for file in structured.get("files") or []:
+                if not isinstance(file, dict):
+                    continue
+                file_path = str(file.get("file_path", "")).strip()
+                if not file_path:
+                    print("Warning: skipping file entry with empty file_path")
+                    continue
+                file_analysis[file_path] = file_analysis_entry_to_markdown(file)
         elapsed = time.perf_counter() - start_time
         print(f"\nFile analyzer #{self.id}: completed in {elapsed:.2f}s")
         return {"file_analysis": file_analysis, "token_usage": token_usage}
@@ -85,9 +130,10 @@ class FileAnalyzer:
         print(f"File analyzer #{self.id}: writing {len(state['file_analysis'])} file analysis to {state['write_directory']}")
         write_directory = state['write_directory']
         file_analysis = state['file_analysis']
-        for file_path, analysis in file_analysis.items():
-            output_path = PurePath(write_directory, "file_analysis.md")
-            write_to_file(str(output_path), f"{file_path}\n{analysis}\n\n", 'a')
+        output_path = PurePath(write_directory, "file_analysis.md")
+        for file_path in sorted(file_analysis.keys()):
+            markdown_block = file_analysis[file_path]
+            write_to_file(str(output_path), markdown_block + "\n", 'a')
         return {"write_status": True, "token_usage": state.get("token_usage", {})}
 
     def build_workflow(self):
