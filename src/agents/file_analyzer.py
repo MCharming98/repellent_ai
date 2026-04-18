@@ -86,11 +86,10 @@ class FileAnalyzer:
         file_analysis = {}
         source_files = state['source_code_files']
         batch_size = len(source_files)
-        token_usage: dict[str, int] = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-        }
+        token_usage: dict[str, int] = dict(
+            state.get("token_usage")
+            or {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        )
 
         for batch_start in range(0, len(source_files), batch_size):
             batch = source_files[batch_start : batch_start + batch_size]
@@ -107,9 +106,13 @@ class FileAnalyzer:
                 - File content: {file_content}
 
                 """
-            result = self.agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]}
-            )
+            try:
+                result = self.agent.invoke(
+                    {"messages": [{"role": "user", "content": prompt}]}
+                )
+            except Exception as e:
+                print(f"Error: File analyzer #{self.id}: {e}")
+                return {"write_status": False, "token_usage": token_usage}
             usage = aggregate_token_usage_from_messages(result.get("messages") or [])
             if usage:
                 token_usage = merge_token_usage_totals(token_usage, usage)
@@ -136,15 +139,40 @@ class FileAnalyzer:
             write_to_file(str(output_path), markdown_block + "\n", 'a')
         return {"write_status": True, "token_usage": state.get("token_usage", {})}
 
+    def fetch_missing_files(self, state: State):
+        """If any paths in this agent's batch lack analysis, narrow ``source_code_files`` and retry."""
+        expected = state['source_code_files']
+        fa = state.get("file_analysis") or {}
+        if len(fa) >= len(expected):
+            return {}
+        missing = [f for f in expected if f not in fa]
+        if not missing:
+            return {}
+        print(
+            f"File analyzer #{self.id}: {len(missing)} missing file(s) of {len(expected)}; "
+            "re-running analyze_files"
+        )
+        return {"source_code_files": missing, "file_analysis": {}}
+
+    def check_for_missing_files(self, state: State) -> bool:
+        """Check if there are any missing files in the file analysis."""
+        return len(state.get("file_analysis") or {}) < len(state['source_code_files'])
+
     def build_workflow(self):
         # print(f"Agent {self.id}: build workflow")
         self.workflow = StateGraph(self.State)
         self.workflow.add_node("analyze_files", self.analyze_files)
         self.workflow.add_node("write_analysis_to_file", self.write_analysis_to_file)
+        self.workflow.add_node("fetch_missing_files", self.fetch_missing_files)
 
         self.workflow.add_edge(START, "analyze_files")
         self.workflow.add_edge("analyze_files", "write_analysis_to_file")
-        self.workflow.add_edge("write_analysis_to_file", END)
+        self.workflow.add_conditional_edges(
+            "write_analysis_to_file",
+            self.check_for_missing_files,
+            {True: "fetch_missing_files", False: END},
+        )
+        self.workflow.add_edge("fetch_missing_files", "analyze_files")
         self.workflow = self.workflow.compile()
 
     async def run(self):
@@ -153,5 +181,7 @@ class FileAnalyzer:
             "read_directory": self.read_directory,
             "write_directory": self.write_directory,
             "source_code_files": self.files,
+            "file_analysis": {},
+            "write_status": False,
         })
         return final_state

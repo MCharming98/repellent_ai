@@ -151,9 +151,14 @@ class FileAnalysisWorkflow:
         async def _run():
             results = await asyncio.gather(*[agent.run() for agent in state["agents"]])
             merged = merge_token_usage_totals(None, None)
-            for r in results:
+            for i, r in enumerate(results):
                 if isinstance(r, dict) and r.get("token_usage"):
                     merged = merge_token_usage_totals(merged, r["token_usage"])
+                if isinstance(r, dict) and not r.get("write_status", False):
+                    print(
+                        f"Warning: File Analysis Workflow: agent index {i} returned "
+                        "write_status=False"
+                    )
             self.token_usage = merged
 
         asyncio.run(_run())
