@@ -1,1 +1,6 @@
 PyYAML>=6.0
+tiktoken>=0.7.0
+anthropic-tokenizer>=0.1.0
+sentencepiece>=0.2.0
+huggingface_hub>=0.20.0
+transformers>=4.40.0

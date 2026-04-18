@@ -1,10 +1,8 @@
-# Repellent AI — main entry.
-#
-# Batch size for file analysis (FileAnalyzer batches).
-file_analysis_batch_size: 10
+# Repellent AI — Configuration file.
 
 model_name: gemini-3-flash-preview
 model_provider: google_genai
+model_context_window: 1000000
 
 # API key: literal, or exactly $VAR_NAME / ${VAR_NAME} to read that environment variable.
 api_key: $GEMINI_API_KEY

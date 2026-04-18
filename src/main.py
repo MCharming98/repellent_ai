@@ -4,6 +4,7 @@ from pathlib import Path
 
 from utils.config import (
     default_config_path,
+    get_model_context_window,
     load_config,
     load_runtime_settings,
     require_api_key,
@@ -23,6 +24,7 @@ def _run_onboard(repository: str) -> None:
     domain_knowledge_dir = f"domain_knowledge/{project_name}"
 
     batch_size = int(cfg.get("file_analysis_batch_size", 10))
+    model_context_window = get_model_context_window(cfg)
 
     onboarding_workflow = OnboardingWorkflow(
         source_repository=repository,
@@ -31,6 +33,7 @@ def _run_onboard(repository: str) -> None:
         model=model_name,
         model_provider=model_provider,
         api_key=api_key,
+        model_context_window=model_context_window,
     )
     onboarding_workflow.build_workflow()
     onboarding_workflow.run()

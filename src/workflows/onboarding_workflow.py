@@ -12,13 +12,23 @@ from .file_analysis_workflow import FileAnalysisWorkflow
 
 
 class OnboardingWorkflow:
-    def __init__(self, source_repository: str, domain_knowledge: str, file_analysis_batch_size: int, model: str, model_provider: str, api_key: str):
+    def __init__(
+        self,
+        source_repository: str,
+        domain_knowledge: str,
+        file_analysis_batch_size: int,
+        model: str,
+        model_provider: str,
+        api_key: str,
+        model_context_window: int,
+    ):
         self.source_repository = source_repository
         self.domain_knowledge = domain_knowledge
         self.file_analysis_batch_size = file_analysis_batch_size
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
+        self.model_context_window = model_context_window
 
     class State(TypedDict):
         source_repository: str
@@ -26,6 +36,7 @@ class OnboardingWorkflow:
         file_analysis_batch_size: int
         model: str
         model_provider: str
+        model_context_window: int
         api_key: str
         file_analysis_workflow: FileAnalysisWorkflow
         contributor_analysis_workflow: ContributorAnalysisWorkflow
@@ -40,6 +51,7 @@ class OnboardingWorkflow:
             state["model"],
             state["model_provider"],
             state["api_key"],
+            state["model_context_window"],
         )
         file_analysis_workflow.build_workflow()
 
@@ -124,5 +136,6 @@ class OnboardingWorkflow:
             "file_analysis_batch_size": self.file_analysis_batch_size,
             "model": self.model,
             "model_provider": self.model_provider,
+            "model_context_window": self.model_context_window,
             "api_key": self.api_key,
         })

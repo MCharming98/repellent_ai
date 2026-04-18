@@ -69,6 +69,22 @@ def require_github_token(cfg: dict[str, Any]) -> str:
     return token
 
 
+def get_model_context_window(cfg: dict[str, Any]) -> int:
+    """Maximum input context length for the configured model (``model_context_window`` in YAML; required)."""
+    if "model_context_window" not in cfg or cfg.get("model_context_window") is None:
+        raise ValueError("config.yaml must set `model_context_window` to a non-null value")
+    raw = cfg["model_context_window"]
+    try:
+        n = int(raw)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"config `model_context_window` must be an integer, got {raw!r}"
+        ) from e
+    if n <= 0:
+        raise ValueError(f"config `model_context_window` must be positive, got {n}")
+    return n
+
+
 def load_runtime_settings(cfg: dict[str, Any]) -> tuple[str, str, str, str]:
     """Model settings plus required ``api_key`` and ``github_token`` from *cfg*."""
     api_key = require_api_key(cfg)
