@@ -51,7 +51,7 @@ class FileAnalysisWorkflow:
         source_code_files: list[str]
         token_count_map: dict[str, int]
         file_batches: list[list[str]]
-        agents: list[FileAnalyzer]
+        agents: [FileAnalyzer]
         token_usage: NotRequired[dict[str, int]]
 
     # Nodes
@@ -89,8 +89,8 @@ class FileAnalysisWorkflow:
         buffer = DEFAULT_FILE_ANALYSIS_TOKEN_BUFFER
         prompt_text = get_file_analyzer_prompt_header(1)
         prompt_tokens = estimate_token_count(
-            state["model_provider"],
             prompt_text,
+            state["model_provider"],
             model_name=state["model"],
         )
         limit = state["model_context_window"] - prompt_tokens - buffer
@@ -120,7 +120,7 @@ class FileAnalysisWorkflow:
 
     def create_agents(self, state: State):
         id = 0
-        agents = []
+        agents: [FileAnalyzer] = []
         for batch in state["file_batches"]:
             if not batch:
                 continue
@@ -131,33 +131,40 @@ class FileAnalysisWorkflow:
         return {"agents": agents}
 
     def build_agents(self, state: State):
-        for agent in state['agents']:
+        for agent in state["agents"]:
             agent.build_workflow()
-        return {"agents": state['agents']}
+        return {"agents": state["agents"]}
 
     def run_agents(self, state: State):
         start_time = time.perf_counter()
         stop_event = threading.Event()
 
+        # Run only agents that have not finished writing.
+        to_run = [a for a in state["agents"] if not a.write_status]
+
         def _print_elapsed():
             while not stop_event.is_set():
                 elapsed = time.perf_counter() - start_time
-                print(f"\rFile Analysis Workflow: Running {len(state['agents'])} agents... {elapsed:.1f}s", end="")
+                running_agents = [a for a in state["agents"] if not a.write_status]
+                print(f"\rFile Analysis Workflow: Running {len(running_agents)} agents... {elapsed:.1f}s", end="")
                 stop_event.wait(1)
 
         thread = threading.Thread(target=_print_elapsed, daemon=True)
         thread.start()
 
         async def _run():
-            results = await asyncio.gather(*[agent.run() for agent in state["agents"]])
-            merged = merge_token_usage_totals(None, None)
-            for i, r in enumerate(results):
-                if isinstance(r, dict) and r.get("token_usage"):
-                    merged = merge_token_usage_totals(merged, r["token_usage"])
-                if isinstance(r, dict) and not r.get("write_status", False):
+            results = await asyncio.gather(*[a.run() for a in to_run])
+            merged = merge_token_usage_totals(None, state.get("token_usage"))
+            for r in results:
+                if not isinstance(r, dict):
+                    continue
+                tu = r.get("token_usage")
+                if tu:
+                    merged = merge_token_usage_totals(merged, tu)
+                if not r.get("write_status", False):
                     print(
-                        f"Warning: File Analysis Workflow: agent index {i} returned "
-                        "write_status=False"
+                        "Warning: File Analysis Workflow: agent "
+                        f"{r.get('id', '?')} returned write_status=False"
                     )
             self.token_usage = merged
 
@@ -167,6 +174,12 @@ class FileAnalysisWorkflow:
         elapsed = time.perf_counter() - start_time
         print(f"\rFile Analysis Workflow: Running {len(state['agents'])} agents completed in {elapsed:.2f}s")
         return {"agents": state["agents"], "token_usage": self.token_usage}
+
+    def check_for_failed_agents(self, state: State) -> bool:
+        for agent in state["agents"]:
+            if not agent.write_status:
+                return True
+        return False
 
     def build_workflow(self):
         workflow = StateGraph(self.State)
@@ -183,7 +196,11 @@ class FileAnalysisWorkflow:
         workflow.add_edge("create_file_batches", "create_agents")
         workflow.add_edge("create_agents", "build_agents")
         workflow.add_edge("build_agents", "run_agents")
-        workflow.add_edge("run_agents", END)
+        workflow.add_conditional_edges(
+            "run_agents",
+            self.check_for_failed_agents,
+            {True: "run_agents", False: END},
+        )
         self.workflow = workflow.compile()
 
     async def run(self):

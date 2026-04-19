@@ -13,6 +13,21 @@ from constants.file_analyzer_constants import FILE_ANALYSIS_SCHEMA, get_file_ana
 from utils.langchain import aggregate_token_usage_from_messages, merge_token_usage_totals
 
 
+_RATE_LIMIT_WAIT_SECONDS = 60.0
+
+
+def _is_http_429(exc: BaseException) -> bool:
+    if getattr(exc, "status_code", None) == 429:
+        return True
+    resp = getattr(exc, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) == 429:
+        return True
+    text = str(exc)
+    if "'code': 429" in text or '"code": 429' in text:
+        return True
+    return False
+
+
 def file_analysis_entry_to_markdown(entry: dict[str, Any]) -> str:
     """
     Render one ``FILE_ANALYSIS_SCHEMA`` file object (a single ``files[]`` item) as markdown.
@@ -63,6 +78,7 @@ class FileAnalyzer:
         self.read_directory = read_directory
         self.files = files
         self.write_directory = write_directory
+        self.write_status = False
         model_kwargs = {"api_key": api_key}
         # Default to Google Developer API instead of Vertex AI
         if model_provider == "google_genai":
@@ -73,6 +89,7 @@ class FileAnalyzer:
         )
 
     class State(TypedDict):
+        id: str
         read_directory: str
         write_directory: str
         source_code_files: list[str]
@@ -82,7 +99,7 @@ class FileAnalyzer:
 
     def analyze_files(self, state: State):
         start_time = time.perf_counter()
-        print(f"File analyzer #{self.id}: analyzing {len(state['source_code_files'])} files")
+        print(f"File analyzer #{state['id']}: analyzing {len(state['source_code_files'])} files")
         file_analysis = {}
         source_files = state['source_code_files']
         batch_size = len(source_files)
@@ -111,7 +128,13 @@ class FileAnalyzer:
                     {"messages": [{"role": "user", "content": prompt}]}
                 )
             except Exception as e:
-                print(f"Error: File analyzer #{self.id}: {e}")
+                if _is_http_429(e):
+                    print(
+                        f"File analyzer #{state['id']}: HTTP 429; waiting {_RATE_LIMIT_WAIT_SECONDS:.0f}s "
+                    )
+                    time.sleep(_RATE_LIMIT_WAIT_SECONDS)
+                    return {"file_analysis": file_analysis, "token_usage": token_usage}
+                print(f"Error: File analyzer #{state['id']}: {e}")
                 return {"write_status": False, "token_usage": token_usage}
             usage = aggregate_token_usage_from_messages(result.get("messages") or [])
             if usage:
@@ -126,11 +149,11 @@ class FileAnalyzer:
                     continue
                 file_analysis[file_path] = file_analysis_entry_to_markdown(file)
         elapsed = time.perf_counter() - start_time
-        print(f"\nFile analyzer #{self.id}: completed in {elapsed:.2f}s")
+        print(f"\nFile analyzer #{state['id']}: completed in {elapsed:.2f}s")
         return {"file_analysis": file_analysis, "token_usage": token_usage}
 
     def write_analysis_to_file(self, state: State):
-        print(f"File analyzer #{self.id}: writing {len(state['file_analysis'])} file analysis to {state['write_directory']}")
+        print(f"File analyzer #{state['id']}: writing {len(state['file_analysis'])} file analysis to {state['write_directory']}")
         write_directory = state['write_directory']
         file_analysis = state['file_analysis']
         output_path = PurePath(write_directory, "file_analysis.md")
@@ -149,7 +172,7 @@ class FileAnalyzer:
         if not missing:
             return {}
         print(
-            f"File analyzer #{self.id}: {len(missing)} missing file(s) of {len(expected)}; "
+            f"File analyzer #{state['id']}: {len(missing)} missing file(s) of {len(expected)}; "
             "re-running analyze_files"
         )
         return {"source_code_files": missing, "file_analysis": {}}
@@ -159,7 +182,7 @@ class FileAnalyzer:
         return len(state.get("file_analysis") or {}) < len(state['source_code_files'])
 
     def build_workflow(self):
-        # print(f"Agent {self.id}: build workflow")
+        # print(f"Agent {state['id']}: build workflow")
         self.workflow = StateGraph(self.State)
         self.workflow.add_node("analyze_files", self.analyze_files)
         self.workflow.add_node("write_analysis_to_file", self.write_analysis_to_file)
@@ -176,12 +199,14 @@ class FileAnalyzer:
         self.workflow = self.workflow.compile()
 
     async def run(self):
-        # print(f"Agent {self.id}: run workflow")
+        # print(f"Agent {state['id']}: run workflow")
         final_state = await self.workflow.ainvoke({
+            "id": self.id,
             "read_directory": self.read_directory,
             "write_directory": self.write_directory,
             "source_code_files": self.files,
             "file_analysis": {},
             "write_status": False,
         })
+        self.write_status = final_state.get("write_status", False)
         return final_state
