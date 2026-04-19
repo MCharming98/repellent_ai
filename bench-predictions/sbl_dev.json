@@ -1,0 +1,117 @@
+[
+  {
+    "instance_id": "sqlfluff__sqlfluff-1625",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "sqlfluff__sqlfluff-2419",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "sqlfluff__sqlfluff-1733",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "sqlfluff__sqlfluff-1517",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "sqlfluff__sqlfluff-1763",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "marshmallow-code__marshmallow-1359",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "marshmallow-code__marshmallow-1343",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pvlib__pvlib-python-1707",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pvlib__pvlib-python-1072",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pvlib__pvlib-python-1606",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pvlib__pvlib-python-1854",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pvlib__pvlib-python-1154",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pylint-dev__astroid-1978",
+    "model_name_or_path": "cursor",
+    "model_patch": "diff --git a/astroid/raw_building.py b/astroid/raw_building.py\nindex cc3aa015..cff66437 100644\n--- a/astroid/raw_building.py\n+++ b/astroid/raw_building.py\n@@ -471,7 +471,9 @@ class InspectBuilder:\n             # check if it sounds valid and then add an import node, else use a\n             # dummy node\n             try:\n-                getattr(sys.modules[modname], name)\n+                with warnings.catch_warnings():\n+                    warnings.simplefilter(\"ignore\")\n+                    getattr(sys.modules[modname], name)\n             except (KeyError, AttributeError):\n                 attach_dummy_node(node, name, member)\n             else:\n"
+  },
+  {
+    "instance_id": "pylint-dev__astroid-1333",
+    "model_name_or_path": "cursor",
+    "model_patch": "diff --git a/astroid/modutils.py b/astroid/modutils.py\nindex 6d698469..70019eaa 100644\n--- a/astroid/modutils.py\n+++ b/astroid/modutils.py\n@@ -312,6 +312,7 @@ def modpath_from_file_with_callback(filename, path=None, is_package_cb=None):\n     ):\n         if not pathname:\n             continue\n+        pathname = _cache_normalize_path(pathname)\n         modpath = _get_relative_base_path(filename, pathname)\n         if not modpath:\n             continue\n"
+  },
+  {
+    "instance_id": "pylint-dev__astroid-1196",
+    "model_name_or_path": "cursor",
+    "model_patch": "diff --git a/astroid/nodes/node_classes.py b/astroid/nodes/node_classes.py\nindex 11136f8c..927e86d7 100644\n--- a/astroid/nodes/node_classes.py\n+++ b/astroid/nodes/node_classes.py\n@@ -2361,9 +2361,19 @@ class Dict(NodeNG, Instance):\n             # TODO(cpopa): no support for overriding yet, {1:2, **{1: 3}}.\n             if isinstance(key, DictUnpack):\n                 try:\n-                    return value.getitem(index, context)\n-                except (AstroidTypeError, AstroidIndexError):\n+                    for inferred in value.infer(context):\n+                        if inferred is util.Uninferable:\n+                            continue\n+                        getitem_fn = getattr(inferred, \"getitem\", None)\n+                        if not callable(getitem_fn):\n+                            continue\n+                        try:\n+                            return getitem_fn(index, context)\n+                        except (AstroidTypeError, AstroidIndexError):\n+                            continue\n+                except InferenceError:\n                     continue\n+                continue\n             for inferredkey in key.infer(context):\n                 if inferredkey is util.Uninferable:\n                     continue\n"
+  },
+  {
+    "instance_id": "pylint-dev__astroid-1866",
+    "model_name_or_path": "cursor",
+    "model_patch": "diff --git a/astroid/brain/brain_builtin_inference.py b/astroid/brain/brain_builtin_inference.py\nindex af1ddf4d..77b7068e 100644\n--- a/astroid/brain/brain_builtin_inference.py\n+++ b/astroid/brain/brain_builtin_inference.py\n@@ -954,8 +954,9 @@ def _infer_str_format_call(\n \n     try:\n         formatted_string = format_template.format(*pos_values, **keyword_values)\n-    except (IndexError, KeyError):\n-        # If there is an IndexError there are too few arguments to interpolate\n+    except (IndexError, KeyError, TypeError):\n+        # IndexError: too few arguments; KeyError: missing name; TypeError: value\n+        # incompatible with format spec (e.g. \"{:c}\".format(None)).\n         return iter([util.Uninferable])\n \n     return iter([nodes.const_factory(formatted_string)])\ndiff --git a/tests/unittest_brain_builtin.py b/tests/unittest_brain_builtin.py\nindex dd99444b..2730656e 100644\n--- a/tests/unittest_brain_builtin.py\n+++ b/tests/unittest_brain_builtin.py\n@@ -99,6 +99,7 @@ class TestStringNodes:\n             from missing import Unknown\n             \"My name is {}, I'm {}\".format(Unknown, 12)\n             \"\"\",\n+            \"\"\"\"{:c}\".format(None)\"\"\",\n             \"\"\"\"I am {}\".format()\"\"\",\n             \"\"\"\n             \"My name is {fname}, I'm {age}\".format(fsname = \"Daniel\", age = 12)\n"
+  },
+  {
+    "instance_id": "pylint-dev__astroid-1268",
+    "model_name_or_path": "cursor",
+    "model_patch": "diff --git a/astroid/nodes/as_string.py b/astroid/nodes/as_string.py\nindex 427ccc15..f960dc1b 100644\n--- a/astroid/nodes/as_string.py\n+++ b/astroid/nodes/as_string.py\n@@ -637,6 +637,9 @@ class AsStringVisitor:\n     def visit_uninferable(self, node):\n         return str(node)\n \n+    def visit_unknown(self, node):\n+        return \"Unknown\"\n+\n     def visit_property(self, node):\n         return node.function.accept(self)\n \n"
+  },
+  {
+    "instance_id": "pyvista__pyvista-4315",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pydicom__pydicom-1694",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pydicom__pydicom-1413",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pydicom__pydicom-901",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pydicom__pydicom-1139",
+    "model_name_or_path": "",
+    "model_patch": ""
+  },
+  {
+    "instance_id": "pydicom__pydicom-1256",
+    "model_name_or_path": "",
+    "model_patch": ""
+  }
+]

@@ -93,8 +93,9 @@ def export_swe_bench_issues(
     issues_root: Path,
 ) -> None:
     """
-    For each row, create ``issues/<repo>/<issue_id>/`` with ``issue_details.json``
-    and a plain ``commit_hash`` file (content from ``base_commit``).
+    For each row, create ``issues/<repo>/<issue_id>/`` with ``issue_details.json``,
+    ``bench_config.json`` (``instance_id`` and ``commit_hash`` from ``base_commit``),
+    and a plain ``commit_hash`` file.
     """
     for example in _iter_dataset_rows(dataset):
         repo = example.get("repo") or ""
@@ -121,19 +122,64 @@ def export_swe_bench_issues(
 
         base_commit = example.get("base_commit")
         commit_str = base_commit.strip() if isinstance(base_commit, str) else ""
+        bench_config = {"instance_id": instance_id, "commit_hash": commit_str}
+        bench_config_path = issue_dir / "bench_config.json"
+        with open(bench_config_path, "w", encoding="utf-8") as f:
+            json.dump(bench_config, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+
         (issue_dir / "commit_hash").write_text(commit_str + "\n", encoding="utf-8")
+
+
+def export_eval_template(dataset: Union[DatasetDict, Dataset], dataset_name: str) -> Path:
+    """
+    Build an empty SWE-bench ``predictions`` JSON (a list of dicts) for every row.
+
+    Each entry has ``instance_id``, ``model_name_or_path``, and ``model_patch`` (the
+    latter two empty strings). Writes ``bench-predictions/<dataset_name>.json`` under
+    the repository root (``dataset_name`` may contain ``/``; it is sanitized for the
+    filesystem).
+    """
+    bench_predictions_root = (
+        Path(__file__).resolve().parent.parent.parent / "bench-predictions"
+    )
+    bench_predictions_root.mkdir(parents=True, exist_ok=True)
+    safe_stem = dataset_name.replace("/", "__").replace("\\", "__")
+    out_path = bench_predictions_root / f"{safe_stem}.json"
+
+    seen: Set[str] = set()
+    rows: List[Dict[str, str]] = []
+    for example in _iter_dataset_rows(dataset):
+        instance_id = example.get("instance_id") or ""
+        if not isinstance(instance_id, str) or not instance_id.strip():
+            continue
+        if instance_id in seen:
+            continue
+        seen.add(instance_id)
+        rows.append(
+            {
+                "instance_id": instance_id,
+                "model_name_or_path": "",
+                "model_patch": "",
+            }
+        )
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(rows, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return out_path
 
 
 # Load main dataset
 sbf = load_dataset('SWE-bench/SWE-bench')
 # Load verified variant
-sbv = load_dataset('SWE-bench/SWE-bench_Verified', split='test')
+sbv_test = load_dataset('SWE-bench/SWE-bench_Verified', split='test')
 # Load lite variant
-sbl = load_dataset('SWE-bench/SWE-bench_Lite')
+sbl_dev = load_dataset('SWE-bench/SWE-bench_Lite', split='dev')
 
 # Fetch all repositories and clone them to the projects directory
 """
-repo_set = repo_set_from_dataset(sbl)
+repo_set = repo_set_from_dataset(sbl_dev)
 _projects_root = Path(__file__).resolve().parent.parent.parent / "projects"
 for owner, repo in sorted(repo_set):
     print(f"Cloning {owner}/{repo}")
@@ -147,4 +193,5 @@ for owner, repo in sorted(repo_set):
 
 # Export SWE-bench issues to the issues directory
 _issues_root = Path(__file__).resolve().parent.parent.parent / "issues"
-export_swe_bench_issues(sbl, _issues_root)
+export_swe_bench_issues(sbl_dev, _issues_root)
+export_eval_template(sbl_dev, "sbl_dev")
