@@ -22,7 +22,7 @@ from constants.hypothesis_investigator_constants import (
 )
 from utils import checkout, format_key_to_subheading, read_file, write_to_file
 from utils.langchain import get_llm_agent
-from utils.tools import list_files_tool, list_source_files_recursive_tool, read_file_tool, write_to_file_tool 
+from utils.tools import list_files_tool, list_source_files_recursive_tool, read_file_tool 
 
 # Stable section order for markdown output (schema ``required`` order).
 _INVESTIGATION_MARKDOWN_KEY_ORDER = tuple(INVESTIGATION_ANALYSIS_SCHEMA["required"])
@@ -153,7 +153,7 @@ class HypothesisInvestigator:
             model_provider,
             api_key,
             enable_web_search=True,
-            tools=[list_source_files_recursive_tool, read_file_tool, write_to_file_tool],
+            tools=[list_source_files_recursive_tool, read_file_tool],
             response_format=ToolStrategy(INVESTIGATION_ANALYSIS_SCHEMA),
         )
         self.workflow = None

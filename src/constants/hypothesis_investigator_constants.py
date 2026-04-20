@@ -78,7 +78,6 @@ def get_hypothesis_investigator_prompt(
     ### Available Tools
     list_source_files_recursive_tool: list all source files in the given directory recursively
     read_file_tool: read source files by path
-    write_to_file_tool: write or append to a file
     Web search (when enabled)
 
     ### Your Task
