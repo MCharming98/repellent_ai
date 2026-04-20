@@ -14,6 +14,8 @@ from utils.text import estimate_token_count
 
 # Reserved tokens for output / safety margin when sizing file batches.
 DEFAULT_FILE_ANALYSIS_TOKEN_BUFFER = 10_000
+# Avoid batching too many files into a single request as the model start to miss files in the response.
+MAX_FILES_PER_BATCH = 100
 
 
 class FileAnalysisWorkflow:
@@ -105,7 +107,9 @@ class FileAnalysisWorkflow:
         current_batch: list[str] = []
         current_tokens = 0
         for rel_path, file_tokens in sorted(state["token_count_map"].items()):
-            if current_batch and current_tokens + file_tokens > limit:
+            batch_is_full = len(current_batch) >= MAX_FILES_PER_BATCH
+            exceeds_token_limit = current_tokens + file_tokens > limit
+            if current_batch and (batch_is_full or exceeds_token_limit):
                 file_batches.append(current_batch)
                 current_batch = []
                 current_tokens = 0
