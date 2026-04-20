@@ -42,5 +42,7 @@ projects/
 issues/
 archive/
 
-# SWE-bench
+# SWE-bench related files
 SWE-bench/
+SWE-bench-result/
+bench-predictions/
