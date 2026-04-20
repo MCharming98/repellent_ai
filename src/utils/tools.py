@@ -12,8 +12,9 @@ def list_files_tool(path: str) -> list[str]:
 
     Returns:
     """
-    print(f"list_files: listing files in {path}")
-    return files.list_files(path)
+    files_list = files.list_files(path)
+    print(f"list_files_tool: listing {len(files_list)} files in {path}")
+    return files_list
 
 @tool
 def list_source_files_recursive_tool(path: str) -> list[str]:
@@ -28,8 +29,9 @@ def list_source_files_recursive_tool(path: str) -> list[str]:
         List[str]: List of relative file paths. Returns an error message list if the path
         doesn't exist or is not a directory.
     """
-    print(f"list_source_files_recursive_tool: listing source files in {path}")
-    return files.list_source_files_recursive(path)
+    files_list = files.list_source_files_recursive(path)
+    print(f"list_source_files_recursive_tool: listing {len(files_list)} source files in {path}")
+    return files_list
 
 @tool
 def read_file_tool(path: str) -> str:
@@ -42,8 +44,12 @@ def read_file_tool(path: str) -> str:
     Returns:
         str: The file contents, or an error message if the file doesn't exist or cannot be read.
     """
-    print(f"read_file_tool: reading file {path}")
-    return files.read_file(path)
+    file_contents = files.read_file(path)
+    if file_contents.startswith("Error:"):
+        print(f"read_file_tool: error — {path} — {file_contents}")
+    else:
+        print(f"read_file_tool: ok — {path} ({len(file_contents)} chars)")
+    return file_contents
 
 @tool
 def write_to_file_tool(path: str, content: str, mode: Literal['w', 'a'] = 'a') -> str:

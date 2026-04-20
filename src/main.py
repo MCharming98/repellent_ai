@@ -42,7 +42,6 @@ def _run_onboard(repository: str) -> None:
 def _run_analyze(
     issue_url: str | None,
     issue_path: str | None,
-    commit_hash: str | None,
     source_dir: str | None,
     domain_knowledge_dir: str | None,
     output_dir: str,
@@ -73,7 +72,6 @@ def _run_analyze(
     workflow = BugAnalysisWorkflow(
         issue_url=issue_url or "",
         issue_path=issue_path or "",
-        commit_hash=commit_hash,
         output_dir=output_dir,
         source_dir=source,
         domain_knowledge_dir=domain_knowledge,
@@ -128,12 +126,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Local issue directory path (e.g. issues/AntennaPod/8311).",
     )
     analyze.add_argument(
-        "--commit",
-        dest="commit_hash",
-        default=None,
-        help="Optional commit hash/ref to checkout before investigator LLM call.",
-    )
-    analyze.add_argument(
         "--source-dir",
         default=None,
         help="Source repository path (default: projects/<repo_from_url>).",
@@ -165,7 +157,6 @@ def main() -> None:
         _run_analyze(
             issue_url=args.issue_url,
             issue_path=args.issue_path,
-            commit_hash=args.commit_hash,
             source_dir=args.source_dir,
             domain_knowledge_dir=args.domain_knowledge_dir,
             output_dir=args.output_dir,

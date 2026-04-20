@@ -25,7 +25,6 @@ class BugAnalysisWorkflow:
     class State(TypedDict):
         issue_url: str
         issue_path: str
-        commit_hash: str
         owner: str
         repo: str
         issue_number: int
@@ -48,7 +47,6 @@ class BugAnalysisWorkflow:
         model_provider: str,
         api_key: str,
         github_token: str = "",
-        commit_hash: str | None = None,
     ) -> None:
         self.issue_url = issue_url or ""
         self.issue_path = issue_path or ""
@@ -59,7 +57,6 @@ class BugAnalysisWorkflow:
         self.model_provider = model_provider
         self.api_key = api_key
         self.github_token = github_token
-        self.commit_hash = commit_hash or ""
         self.workflow = None
 
     def _entrypoint(self, state: State) -> str:
@@ -149,7 +146,6 @@ class BugAnalysisWorkflow:
             model=state["model"],
             model_provider=state["model_provider"],
             api_key=state["api_key"],
-            commit_hash=state["commit_hash"] or None,
         )
         investigator.build_workflow()
         asyncio.run(investigator.run())
@@ -192,7 +188,6 @@ class BugAnalysisWorkflow:
                 "model_provider": self.model_provider,
                 "api_key": self.api_key,
                 "github_token": self.github_token,
-                "commit_hash": self.commit_hash,
             }
         )
 
@@ -242,11 +237,6 @@ def main() -> None:
         help="LLM provider (default: google_genai)",
     )
     parser.add_argument("--api-key", required=True, help="API key for LLM provider")
-    parser.add_argument(
-        "--commit-hash",
-        default=None,
-        help="Optional commit hash/ref to checkout before investigator LLM call.",
-    )
     args = parser.parse_args()
 
     if not args.issue_url and not args.issue_path:
@@ -264,7 +254,6 @@ def main() -> None:
         model_provider=args.model_provider,
         api_key=args.api_key,
         github_token=github_token,
-        commit_hash=args.commit_hash,
     )
     workflow.run()
 

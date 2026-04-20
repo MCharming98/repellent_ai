@@ -84,7 +84,8 @@ def checkout(commit_hash: str) -> None:
 
     Args:
         commit_hash: Git ref to check out (branch, tag, or SHA).
-            Special input ``latest`` runs ``git switch -``.
+            Special input ``latest`` restores the previous HEAD: tries ``git switch -``,
+            then ``git checkout ORIG_HEAD`` if the reflog has no ``@{-1}``.
 
     Raises:
         RuntimeError: If ``git checkout`` fails.

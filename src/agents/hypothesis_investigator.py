@@ -27,6 +27,28 @@ from utils.tools import list_files_tool, list_source_files_recursive_tool, read_
 # Stable section order for markdown output (schema ``required`` order).
 _INVESTIGATION_MARKDOWN_KEY_ORDER = tuple(INVESTIGATION_ANALYSIS_SCHEMA["required"])
 
+BENCH_CONFIG_JSON = "bench_config.json"
+
+
+def _resolved_issue_dir(issue_dir: str | Path) -> Path:
+    p = Path(issue_dir).resolve()
+    if p.is_file():
+        return p.parent
+    return p
+
+
+def _commit_hash_from_bench_config(issue_dir: Path) -> str | None:
+    """Read ``commit_hash`` from ``issue_dir`` / ``bench_config.json`` if present and non-empty."""
+    path = issue_dir / BENCH_CONFIG_JSON
+    if not path.is_file():
+        return None
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    h = cfg.get("commit_hash")
+    if isinstance(h, str) and h.strip():
+        return h.strip()
+    return None
+
 def format_investigation_analysis_to_markdown(data: dict) -> str:
     """
     Render an INVESTIGATION_ANALYSIS_SCHEMA-shaped dict as markdown.
@@ -121,7 +143,12 @@ def extract_tool_use_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
 
 
 class HypothesisInvestigator:
-    """Validates or falsifies one hypothesis using issue context and domain knowledge."""
+    """Validates or falsifies one hypothesis using issue context and domain knowledge.
+
+    If ``issue_dir`` / ``bench_config.json`` exists and contains a non-empty ``commit_hash``,
+    that ref is checked out in ``source_dir`` during ``analyze_hypothesis``; otherwise no
+    checkout is performed.
+    """
 
     class State(TypedDict):
         issue_details: dict
@@ -138,15 +165,15 @@ class HypothesisInvestigator:
         model: str,
         model_provider: str,
         api_key: str,
-        commit_hash: str | None = None,
     ) -> None:
-        self.issue_dir = issue_dir
+        issue_path = _resolved_issue_dir(issue_dir)
+        self.issue_dir = str(issue_path)
         self.source_dir = source_dir
         self.domain_knowledge_dir = domain_knowledge_dir
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
-        self.commit_hash = commit_hash
+        self.commit_hash = _commit_hash_from_bench_config(issue_path)
 
         self.agent = get_llm_agent(
             model,
@@ -161,8 +188,6 @@ class HypothesisInvestigator:
     def load_context(self, state: State) -> dict:
         """Load issue JSON, diagnosis.md (including hypotheses), and file_analysis from domain knowledge."""
         issue_dir = Path(self.issue_dir)
-        if issue_dir.is_file():
-            issue_dir = issue_dir.parent
         issue_details_path = issue_dir / "issue_details.json"
         with open(issue_details_path, encoding="utf-8") as f:
             issue_details = json.load(f)
@@ -192,18 +217,24 @@ class HypothesisInvestigator:
         print("Hypothesis investigator: running analysis agent...")
         start_time = time.perf_counter()
         prev_cwd = os.getcwd()
+        print(f"Hypothesis investigator: current working directory: {prev_cwd}")
         os.chdir(self.source_dir)
+        print(f"Hypothesis investigator: changed working directory to: {self.source_dir}")
         try:
             if self.commit_hash:
-                print(f"Hypothesis investigator: checking out commit {self.commit_hash}")
+                print(
+                    f"Hypothesis investigator: checking out commit {self.commit_hash}"
+                )
                 checkout(self.commit_hash)
             result = self.agent.invoke(
                 {"messages": [{"role": "user", "content": prompt}]}
             )
         finally:
-            os.chdir(prev_cwd)
+            # Restore git state while cwd is still ``source_dir`` (``checkout`` uses cwd).
             if self.commit_hash:
                 checkout("latest")
+            os.chdir(prev_cwd)
+            print(f"Hypothesis investigator: restored working directory to: {prev_cwd}")
         elapsed = time.perf_counter() - start_time
         messages_for_usage = result.get("messages") or []
         usage = aggregate_token_usage_from_messages(messages_for_usage)
@@ -240,8 +271,6 @@ class HypothesisInvestigator:
     def append_hypothesis_analysis_to_file(self, state: State) -> dict:
         """Append structured investigation output as markdown to ``diagnosis.md`` in the issue dir."""
         issue_dir = Path(self.issue_dir)
-        if issue_dir.is_file():
-            issue_dir = issue_dir.parent
         diagnosis_path = str(issue_dir / "diagnosis.md")
         md = format_investigation_analysis_to_markdown(state["hypothesis_analysis"])
         block = "\n\n---\n\n## Investigation analysis\n\n" + md
@@ -293,11 +322,6 @@ def main() -> None:
     parser.add_argument("--model", default="gemini-3-flash-preview")
     parser.add_argument("--model-provider", default="google_genai")
     parser.add_argument("--api-key", required=True)
-    parser.add_argument(
-        "--commit-hash",
-        default=None,
-        help="Optional commit hash/ref to checkout in --source-dir before analysis.",
-    )
     args = parser.parse_args()
 
     investigator = HypothesisInvestigator(
@@ -307,7 +331,6 @@ def main() -> None:
         model=args.model,
         model_provider=args.model_provider,
         api_key=args.api_key,
-        commit_hash=args.commit_hash,
     )
     investigator.build_workflow()
     asyncio.run(investigator.run())
