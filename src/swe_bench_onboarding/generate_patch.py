@@ -31,14 +31,17 @@ def _status(msg: str, *, quiet: bool) -> None:
         print(f"[generate_patch] {msg}", file=sys.stderr, flush=True)
 
 
-def _build_agent_prompt(issue_details_text: str) -> str:
-    return (
+def _build_agent_prompt(issue_details_text: str, diagnosis_text: str | None = None) -> str:
+    prompt = (
         "You are fixing a bug in this git repository at the checked-out commit.\n"
         "Read the issue details and implement the minimal correct fix by editing "
         "source files. Do not run `git commit`.\n"
         "After your edits, the harness will record the change as a git unified diff.\n\n"
         f"Issue details:\n{issue_details_text}\n"
     )
+    if diagnosis_text:
+        prompt += f"\nDiagnosis context:\n{diagnosis_text}\n"
+    return prompt
 
 
 def _find_agent_executable() -> str:
@@ -152,6 +155,7 @@ def generate_patch_for_bench_instance(
     repo_path: Union[Path, str],
     issue_dir_path: Union[Path, str],
     bench_predictions_path: Union[Path, str],
+    diagnosis_path: Union[Path, str, None] = None,
     *,
     model_name: str = "cursor",
     quiet: bool = False,
@@ -175,6 +179,7 @@ def generate_patch_for_bench_instance(
     repo_path = Path(repo_path).resolve()
     issue_dir = Path(issue_dir_path).resolve()
     bench_predictions_path = Path(bench_predictions_path).resolve()
+    diagnosis_file = Path(diagnosis_path).resolve() if diagnosis_path else None
 
     if not issue_dir.is_dir():
         raise NotADirectoryError(f"issue_dir_path is not a directory: {issue_dir}")
@@ -192,6 +197,11 @@ def generate_patch_for_bench_instance(
 
     issue_details = json.loads(issue_details_path.read_text(encoding="utf-8"))
     bench_config = json.loads(bench_config_path.read_text(encoding="utf-8"))
+    diagnosis_text: str | None = None
+    if diagnosis_file is not None:
+        if not diagnosis_file.is_file():
+            raise FileNotFoundError(f"diagnosis_path is not a file: {diagnosis_file}")
+        diagnosis_text = diagnosis_file.read_text(encoding="utf-8")
 
     instance_id = bench_config.get("instance_id")
     commit_hash = bench_config.get("commit_hash")
@@ -208,6 +218,8 @@ def generate_patch_for_bench_instance(
         f"instance_id={instance_id.strip()!r} repo={repo_path} issue_dir={issue_dir}",
         quiet=quiet,
     )
+    if diagnosis_file is not None:
+        _status(f"using diagnosis file: {diagnosis_file}", quiet=quiet)
     _status(f"bench commit {ch[:12]}…", quiet=quiet)
 
     _status("git checkout -f <bench commit>", quiet=quiet)
@@ -219,7 +231,7 @@ def generate_patch_for_bench_instance(
     _status("checkout complete", quiet=quiet)
 
     try:
-        prompt = _build_agent_prompt(str(issue_details))
+        prompt = _build_agent_prompt(str(issue_details), diagnosis_text=diagnosis_text)
         _status(
             "running Cursor Agent (-p --force); this may take a long time …",
             quiet=quiet,
@@ -300,6 +312,12 @@ def main() -> int:
         help="Path to SWE-bench predictions JSON to update",
     )
     parser.add_argument(
+        "--diagnosis_path",
+        type=Path,
+        default=None,
+        help="Optional path to diagnosis markdown/text file included in the prompt",
+    )
+    parser.add_argument(
         "--model-name",
         default="cursor",
         help="Value written to model_name_or_path (default: %(default)s)",
@@ -320,6 +338,7 @@ def main() -> int:
             args.repo_path,
             args.issue_dir,
             args.bench_predictions_path,
+            diagnosis_path=args.diagnosis_path,
             model_name=args.model_name,
             quiet=args.quiet,
         )
