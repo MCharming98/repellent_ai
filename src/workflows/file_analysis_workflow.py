@@ -67,22 +67,57 @@ class FileAnalysisWorkflow:
         read_dir = state["read_directory"]
         model_provider = state["model_provider"]
         model_name = state["model"]
-        for rel_path in state["source_code_files"]:
+        model_context_window = state["model_context_window"]
+        total_files = len(state["source_code_files"])
+        start_time = time.perf_counter()
+
+        for i, rel_path in enumerate(state["source_code_files"], start=1):
             if rel_path.startswith("Error:"):
+                elapsed = time.perf_counter() - start_time
+                remaining = total_files - i
+                print(
+                    f"\rFile Analysis Workflow: Estimating file tokens... "
+                    f"remaining={remaining} elapsed={elapsed:.1f}s",
+                    end="",
+                    flush=True,
+                )
                 continue
             full_path = os.path.join(read_dir, rel_path)
             content = read_file(full_path)
             if content.startswith("Error:"):
                 token_count_map[rel_path] = 0
+                elapsed = time.perf_counter() - start_time
+                remaining = total_files - i
+                print(
+                    f"\rFile Analysis Workflow: Estimating file tokens... "
+                    f"remaining={remaining} elapsed={elapsed:.1f}s",
+                    end="",
+                    flush=True,
+                )
                 continue
             n = estimate_token_count(
                 content,
                 model_provider,
+                model_context_window,
                 model_name=model_name,
             )
+            if n > model_context_window:
+                raise ValueError(
+                    f"File '{rel_path}' estimated at {n} tokens exceeds model context window "
+                    f"({model_context_window}). Split or exclude this file, or use a model with a larger context window."
+                )
             token_count_map[rel_path] = n
+            elapsed = time.perf_counter() - start_time
+            remaining = total_files - i
+            print(
+                f"\rFile Analysis Workflow: Estimating file tokens... "
+                f"remaining={remaining} elapsed={elapsed:.1f}s",
+                end="",
+                flush=True,
+            )
+        elapsed = time.perf_counter() - start_time
         print(
-            f"File Analysis Workflow: Estimated tokens for {len(token_count_map)} files "
+            f"\rFile Analysis Workflow: Estimating file tokens completed in {elapsed:.2f}s"
         )
         return {"token_count_map": token_count_map}
 
@@ -93,6 +128,7 @@ class FileAnalysisWorkflow:
         prompt_tokens = estimate_token_count(
             prompt_text,
             state["model_provider"],
+            state["model_context_window"],
             model_name=state["model"],
         )
         limit = state["model_context_window"] - prompt_tokens - buffer

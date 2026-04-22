@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -187,28 +188,79 @@ def export_eval_template(dataset: Union[DatasetDict, Dataset], dataset_name: str
     return out_path
 
 
-# Load main dataset
-sbf = load_dataset('SWE-bench/SWE-bench')
-# Load verified variant
-sbv_test = load_dataset('SWE-bench/SWE-bench_Verified', split='test')
-# Load lite variant
-sbl_dev = load_dataset('SWE-bench/SWE-bench_Lite', split='dev')
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Export SWE-bench issue artifacts from a Hugging Face dataset."
+    )
+    parser.add_argument(
+        "--dataset",
+        choices=("default", "lite", "verified"),
+        default="default",
+        help=(
+            "Dataset variant: default -> SWE-bench, lite -> SWE-bench_Lite, "
+            "verified -> SWE-bench_Verified."
+        ),
+    )
+    parser.add_argument(
+        "--split",
+        default=None,
+        help="Optional dataset split to load (e.g. dev, test).",
+    )
+    parser.add_argument(
+        "--issues-root",
+        default=str(Path(__file__).resolve().parent.parent.parent / "issues"),
+        help="Output root for issue folders. Default: <repo_root>/issues",
+    )
+    parser.add_argument(
+        "--clone-repos",
+        action="store_true",
+        help="Also clone all repos referenced by the selected dataset/split.",
+    )
+    parser.add_argument(
+        "--projects-root",
+        default=str(Path(__file__).resolve().parent.parent.parent / "projects"),
+        help="Destination root used with --clone-repos. Default: <repo_root>/projects",
+    )
+    parser.add_argument(
+        "--export-eval-template",
+        action="store_true",
+        help="Also create bench-predictions/<sanitized_dataset_name>.json.",
+    )
+    args = parser.parse_args()
 
-# Fetch all repositories and clone them to the projects directory
-"""
-repo_set = repo_set_from_dataset(sbl_dev)
-_projects_root = Path(__file__).resolve().parent.parent.parent / "projects"
-for owner, repo in sorted(repo_set):
-    print(f"Cloning {owner}/{repo}")
-    dest = _projects_root / repo
-    if dest.exists() and any(dest.iterdir()):
-        print(f"skip (already present): {owner}/{repo}")
-        continue
-    url = f"https://github.com/{owner}/{repo}"
-    clone_github_repo(url, str(dest))
-"""
+    dataset_map = {
+        "default": "SWE-bench/SWE-bench",
+        "lite": "SWE-bench/SWE-bench_Lite",
+        "verified": "SWE-bench/SWE-bench_Verified",
+    }
+    dataset_name = dataset_map[args.dataset]
 
-# Export SWE-bench issues to the issues directory
-_issues_root = Path(__file__).resolve().parent.parent.parent / "issues"
-export_swe_bench_issues(sbl_dev, _issues_root)
-#export_eval_template(sbl_dev, "sbl_dev")
+    split = args.split.strip() if isinstance(args.split, str) else ""
+    if split:
+        dataset = load_dataset(dataset_name, split=split)
+    else:
+        dataset = load_dataset(dataset_name)
+
+    if args.clone_repos:
+        repo_set = repo_set_from_dataset(dataset)
+        projects_root = Path(args.projects_root).resolve()
+        for owner, repo in sorted(repo_set):
+            print(f"Cloning {owner}/{repo}")
+            dest = projects_root / repo
+            if dest.exists() and any(dest.iterdir()):
+                print(f"skip (already present): {owner}/{repo}")
+                continue
+            url = f"https://github.com/{owner}/{repo}"
+            clone_github_repo(url, str(dest))
+
+    issues_root = Path(args.issues_root).resolve()
+    export_swe_bench_issues(dataset, issues_root)
+
+    if args.export_eval_template:
+        template_name = args.dataset if not split else f"{args.dataset}_{split}"
+        out_path = export_eval_template(dataset, template_name)
+        print(f"Wrote eval template: {out_path}")
+
+
+if __name__ == "__main__":
+    main()
