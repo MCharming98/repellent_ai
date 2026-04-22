@@ -96,15 +96,31 @@ def export_swe_bench_issues(
     For each row, create ``issues/<repo>/<issue_id>/`` with ``issue_details.json``,
     ``bench_config.json`` (``instance_id`` and ``commit_hash`` from ``base_commit``),
     and a plain ``commit_hash`` file.
+
+    Existing files are left unchanged (each path is written only if it does not
+    already exist as a file). If all three outputs already exist, the row is skipped
+    without re-reading or rebuilding JSON.
     """
     for example in _iter_dataset_rows(dataset):
         repo = example.get("repo") or ""
         instance_id = example.get("instance_id") or ""
         if not repo or "/" not in repo or not instance_id:
             continue
-        print(f"Exporting issue {instance_id}")
         _, repo, issue_id = parse_instance_id(instance_id)
         issue_dir = issues_root.joinpath(repo, issue_id)
+        issue_details_path = issue_dir / "issue_details.json"
+        bench_config_path = issue_dir / "bench_config.json"
+        commit_hash_path = issue_dir / "commit_hash"
+
+        if (
+            issue_details_path.is_file()
+            and bench_config_path.is_file()
+            and commit_hash_path.is_file()
+        ):
+            print(f"Skipping issue {instance_id} (outputs already exist)")
+            continue
+
+        print(f"Exporting issue {instance_id}")
         issue_dir.mkdir(parents=True, exist_ok=True)
 
         problem_statement = example.get("problem_statement") or ""
@@ -114,21 +130,22 @@ def export_swe_bench_issues(
         if not isinstance(hints_text, str):
             hints_text = str(hints_text)
 
-        details = issue_details_from_swe_bench(problem_statement, hints_text)
-        issue_details_path = issue_dir / "issue_details.json"
-        with open(issue_details_path, "w", encoding="utf-8") as f:
-            json.dump(details, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        if not issue_details_path.is_file():
+            details = issue_details_from_swe_bench(problem_statement, hints_text)
+            with open(issue_details_path, "w", encoding="utf-8") as f:
+                json.dump(details, f, indent=2, ensure_ascii=False)
+                f.write("\n")
 
         base_commit = example.get("base_commit")
         commit_str = base_commit.strip() if isinstance(base_commit, str) else ""
         bench_config = {"instance_id": instance_id, "commit_hash": commit_str}
-        bench_config_path = issue_dir / "bench_config.json"
-        with open(bench_config_path, "w", encoding="utf-8") as f:
-            json.dump(bench_config, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        if not bench_config_path.is_file():
+            with open(bench_config_path, "w", encoding="utf-8") as f:
+                json.dump(bench_config, f, indent=2, ensure_ascii=False)
+                f.write("\n")
 
-        (issue_dir / "commit_hash").write_text(commit_str + "\n", encoding="utf-8")
+        if not commit_hash_path.is_file():
+            commit_hash_path.write_text(commit_str + "\n", encoding="utf-8")
 
 
 def export_eval_template(dataset: Union[DatasetDict, Dataset], dataset_name: str) -> Path:
@@ -194,4 +211,4 @@ for owner, repo in sorted(repo_set):
 # Export SWE-bench issues to the issues directory
 _issues_root = Path(__file__).resolve().parent.parent.parent / "issues"
 export_swe_bench_issues(sbl_dev, _issues_root)
-export_eval_template(sbl_dev, "sbl_dev")
+#export_eval_template(sbl_dev, "sbl_dev")

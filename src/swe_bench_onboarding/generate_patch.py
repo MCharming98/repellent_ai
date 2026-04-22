@@ -13,6 +13,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Union
@@ -57,29 +59,60 @@ def _find_agent_executable() -> str:
     )
 
 
-def _run_agent(repo_path: Path, prompt: str) -> subprocess.CompletedProcess[str]:
+def _run_agent(
+    repo_path: Path, prompt: str, *, quiet: bool = False
+) -> subprocess.CompletedProcess[str]:
     """Invoke Cursor Agent in headless print mode so file changes are applied (not only proposed).
 
     Per https://cursor.com/docs/cli/headless — combine ``-p``/``--print`` with ``--force`` (or
     ``--yolo``) for scripted edits; ``--trust`` is required for headless use of ``--workspace``.
     """
     agent = _find_agent_executable()
-    return subprocess.run(
-        [
-            agent,
-            "-p",
-            "--trust",
-            "--force",
-            "--workspace",
-            str(repo_path),
-            prompt,
-        ],
+    cmd = [
+        agent,
+        "-p",
+        "--trust",
+        "--force",
+        "--workspace",
+        str(repo_path),
+        prompt,
+    ]
+    start = time.perf_counter()
+    proc = subprocess.Popen(
+        cmd,
         cwd=str(repo_path),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
+    stop_event = threading.Event()
+
+    def _wait_progress() -> None:
+        while True:
+            elapsed = time.perf_counter() - start
+            print(
+                f"\r[generate_patch] waiting for Cursor Agent… {elapsed:.0f}s",
+                end="",
+                file=sys.stderr,
+                flush=True,
+            )
+            if stop_event.wait(1.0):
+                break
+
+    tick: threading.Thread | None = None
+    if not quiet:
+        tick = threading.Thread(target=_wait_progress, daemon=True)
+        tick.start()
+    try:
+        stdout, stderr = proc.communicate()
+    finally:
+        if tick is not None:
+            stop_event.set()
+            tick.join(timeout=5.0)
+            print(file=sys.stderr, flush=True)
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def _git(repo_path: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -236,7 +269,7 @@ def generate_patch_for_bench_instance(
             "running Cursor Agent (-p --force); this may take a long time …",
             quiet=quiet,
         )
-        proc = _run_agent(repo_path, prompt)
+        proc = _run_agent(repo_path, prompt, quiet=quiet)
         if proc.returncode != 0:
             raise RuntimeError(
                 "Cursor Agent exited with non-zero status "

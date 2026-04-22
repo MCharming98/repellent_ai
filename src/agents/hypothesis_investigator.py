@@ -21,13 +21,19 @@ from constants.hypothesis_investigator_constants import (
     get_hypothesis_investigator_prompt,
 )
 from utils import checkout, format_key_to_subheading, read_file, write_to_file
-from utils.langchain import get_llm_agent
-from utils.tools import list_files_tool, list_source_files_recursive_tool, read_file_tool 
+from utils.langchain import (
+    _RATE_LIMIT_WAIT_SECONDS,
+    aggregate_token_usage_from_messages,
+    get_llm_agent,
+    is_http_429,
+)
+from utils.tools import list_source_files_recursive_tool, read_file_tool 
 
 # Stable section order for markdown output (schema ``required`` order).
 _INVESTIGATION_MARKDOWN_KEY_ORDER = tuple(INVESTIGATION_ANALYSIS_SCHEMA["required"])
 
 BENCH_CONFIG_JSON = "bench_config.json"
+_RATE_LIMIT_MAX_ATTEMPTS = 1
 
 
 def _resolved_issue_dir(issue_dir: str | Path) -> Path:
@@ -86,42 +92,6 @@ def _message_content_to_str(content: Any) -> str:
                 parts.append(str(block))
         return "\n".join(parts) if parts else str(content)
     return str(content)
-
-
-def aggregate_token_usage_from_messages(messages: list[Any]) -> dict[str, int] | None:
-    """
-    Sum token counts from AIMessage.usage_metadata across agent steps (if present).
-    """
-    input_tokens = 0
-    output_tokens = 0
-    total_tokens = 0
-    found = False
-    for msg in messages or []:
-        if not isinstance(msg, AIMessage):
-            continue
-        um = getattr(msg, "usage_metadata", None)
-        if not isinstance(um, dict) or not um:
-            continue
-        found = True
-        # LangChain normalizes common keys; providers may vary slightly.
-        it = um.get("input_tokens")
-        ot = um.get("output_tokens")
-        tt = um.get("total_tokens")
-        if it is not None:
-            input_tokens += int(it)
-        if ot is not None:
-            output_tokens += int(ot)
-        if tt is not None:
-            total_tokens += int(tt)
-    if not found:
-        return None
-    if total_tokens == 0 and (input_tokens or output_tokens):
-        total_tokens = input_tokens + output_tokens
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
 
 
 def extract_tool_use_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
@@ -226,9 +196,26 @@ class HypothesisInvestigator:
                     f"Hypothesis investigator: checking out commit {self.commit_hash}"
                 )
                 checkout(self.commit_hash)
-            result = self.agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]}
-            )
+            result: dict[str, Any] | None = None
+            for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
+                try:
+                    result = self.agent.invoke(
+                        {"messages": [{"role": "user", "content": prompt}]}
+                    )
+                    break
+                except Exception as e:
+                    if not is_http_429(e) or attempt == _RATE_LIMIT_MAX_ATTEMPTS:
+                        raise
+                    print(
+                        "Hypothesis investigator: HTTP 429 while invoking agent; "
+                        f"waiting {_RATE_LIMIT_WAIT_SECONDS:.0f}s before retry "
+                        f"({attempt}/{_RATE_LIMIT_MAX_ATTEMPTS})"
+                    )
+                    time.sleep(_RATE_LIMIT_WAIT_SECONDS)
+            if result is None:
+                raise RuntimeError(
+                    "Hypothesis investigator: agent invocation returned no result after retries"
+                )
         finally:
             # Restore git state while cwd is still ``source_dir`` (``checkout`` uses cwd).
             if self.commit_hash:

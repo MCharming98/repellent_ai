@@ -10,23 +10,7 @@ from utils import *
 from langchain.agents.structured_output import ToolStrategy
 
 from constants.file_analyzer_constants import FILE_ANALYSIS_SCHEMA, get_file_analyzer_prompt_header
-from utils.langchain import aggregate_token_usage_from_messages, merge_token_usage_totals
-
-
-_RATE_LIMIT_WAIT_SECONDS = 60.0
-
-
-def _is_http_429(exc: BaseException) -> bool:
-    if getattr(exc, "status_code", None) == 429:
-        return True
-    resp = getattr(exc, "response", None)
-    if resp is not None and getattr(resp, "status_code", None) == 429:
-        return True
-    text = str(exc)
-    if "'code': 429" in text or '"code": 429' in text:
-        return True
-    return False
-
+from utils.langchain import aggregate_token_usage_from_messages, merge_token_usage_totals, is_http_429, _RATE_LIMIT_WAIT_SECONDS
 
 def file_analysis_entry_to_markdown(entry: dict[str, Any]) -> str:
     """
@@ -128,7 +112,7 @@ class FileAnalyzer:
                     {"messages": [{"role": "user", "content": prompt}]}
                 )
             except Exception as e:
-                if _is_http_429(e):
+                if is_http_429(e):
                     print(
                         f"File analyzer #{state['id']}: HTTP 429; waiting {_RATE_LIMIT_WAIT_SECONDS:.0f}s "
                     )

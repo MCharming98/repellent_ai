@@ -6,6 +6,8 @@ from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage
 
+_RATE_LIMIT_WAIT_SECONDS = 60.0
+
 # Built-in web search tools per provider (LangChain + provider docs).
 _GEMINI_GOOGLE_SEARCH_TOOL = [{"google_search": {}}]
 _OPENAI_WEB_SEARCH_TOOL = [{"type": "web_search_preview"}]
@@ -109,3 +111,15 @@ def merge_token_usage_totals(
         for k in keys:
             out[k] += int(delta.get(k, 0))
     return out
+
+
+def is_http_429(exc: BaseException) -> bool:
+    if getattr(exc, "status_code", None) == 429:
+        return True
+    resp = getattr(exc, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) == 429:
+        return True
+    text = str(exc)
+    if "'code': 429" in text or '"code": 429' in text:
+        return True
+    return False
