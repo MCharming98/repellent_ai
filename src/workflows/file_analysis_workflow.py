@@ -102,10 +102,19 @@ class FileAnalysisWorkflow:
                 model_name=model_name,
             )
             if n > model_context_window:
-                raise ValueError(
-                    f"File '{rel_path}' estimated at {n} tokens exceeds model context window "
-                    f"({model_context_window}). Split or exclude this file, or use a model with a larger context window."
+                print(
+                    f"\nWarning: File Analysis Workflow: File '{rel_path}' estimated at {n} tokens "
+                    f"exceeds model context window ({model_context_window}). Skipping this file."
                 )
+                elapsed = time.perf_counter() - start_time
+                remaining = total_files - i
+                print(
+                    f"\rFile Analysis Workflow: Estimating file tokens... "
+                    f"remaining={remaining} elapsed={elapsed:.1f}s",
+                    end="",
+                    flush=True,
+                )
+                continue
             token_count_map[rel_path] = n
             elapsed = time.perf_counter() - start_time
             remaining = total_files - i
@@ -245,6 +254,14 @@ class FileAnalysisWorkflow:
 
     async def run(self):
         print("File Analysis Workflow: Run workflow")
+        output_path = os.path.join(self.write_directory, "file_analysis.md")
+        if os.path.exists(output_path):
+            print(
+                f"File Analysis Workflow: '{output_path}' already exists; "
+                "skipping file analysis."
+            )
+            self.status = True
+            return
         await self.workflow.ainvoke({
             "read_directory": self.read_directory,
             "file_batch_size": self.file_batch_size,
