@@ -128,8 +128,8 @@ def _build_saved_filename(
     return f"attachment{ext}"
 
 
-def _format_issue_diagnosis_markdown(data: dict) -> str:
-    """Render full diagnosis.md: triage sections plus all diagnose hypotheses."""
+def _format_issue_hypotheses_markdown(data: dict) -> str:
+    """Render full hypotheses.md: triage sections plus all diagnose hypotheses."""
     blocks: list[str] = []
     for key in _SUMMARY_SECTION_KEYS:
         if key not in data:
@@ -184,8 +184,8 @@ class HypothesisGenerator:
         file_analysis: str
         business_analysis: str
         contributor_analysis: str
-        issue_diagnosis_json: dict
-        issue_diagnosis: str
+        issue_hypotheses_json: dict
+        issue_hypotheses: str
         write_status: bool
 
     def __init__(self, issue_dir: str, domain_knowledge: str, model: str, model_provider: str, api_key: str):
@@ -369,17 +369,17 @@ class HypothesisGenerator:
                 raise ValueError(
                     f"Hypothesis generator: could not parse structured_response: {e}"
                 ) from e
-        return {"issue_diagnosis_json": sr}
+        return {"issue_hypotheses_json": sr}
 
-    def format_issue_diagnosis_markdown(self, state: State) -> dict:
-        md = _format_issue_diagnosis_markdown(state["issue_diagnosis_json"])
-        return {"issue_diagnosis": md}
+    def format_issue_hypotheses_markdown(self, state: State) -> dict:
+        md = _format_issue_hypotheses_markdown(state["issue_hypotheses_json"])
+        return {"issue_hypotheses": md}
 
     def write_analysis_to_file(self, state: State) -> dict:
         issue_dir = Path(state["issue_dir"])
-        diagnosis_path = issue_dir / "diagnosis.md"
-        print(f"Hypothesis generator: Writing diagnosis to {diagnosis_path}")
-        write_to_file(str(diagnosis_path), state["issue_diagnosis"], "w")
+        hypotheses_path = issue_dir / "hypotheses.md"
+        print(f"Hypothesis generator: Writing hypotheses to {hypotheses_path}")
+        write_to_file(str(hypotheses_path), state["issue_hypotheses"], "w")
         return {"write_status": True}
 
     def build_workflow(self):
@@ -388,19 +388,26 @@ class HypothesisGenerator:
         self.workflow.add_node("collect_issue_attachments", self.collect_issue_attachments)
         self.workflow.add_node("load_project_knowledge", self.load_project_knowledge)
         self.workflow.add_node("analyze_issue", self.analyze_issue)
-        self.workflow.add_node("format_issue_diagnosis_markdown", self.format_issue_diagnosis_markdown)
+        self.workflow.add_node("format_issue_hypotheses_markdown", self.format_issue_hypotheses_markdown)
         self.workflow.add_node("write_analysis_to_file", self.write_analysis_to_file)
 
         self.workflow.add_edge(START, "load_issue")
         self.workflow.add_edge("load_issue", "collect_issue_attachments")
         self.workflow.add_edge("collect_issue_attachments", "load_project_knowledge")
         self.workflow.add_edge("load_project_knowledge", "analyze_issue")
-        self.workflow.add_edge("analyze_issue", "format_issue_diagnosis_markdown")
-        self.workflow.add_edge("format_issue_diagnosis_markdown", "write_analysis_to_file")
+        self.workflow.add_edge("analyze_issue", "format_issue_hypotheses_markdown")
+        self.workflow.add_edge("format_issue_hypotheses_markdown", "write_analysis_to_file")
         self.workflow.add_edge("write_analysis_to_file", END)
         self.workflow = self.workflow.compile()
 
     async def run(self):
+        hypotheses_path = self.issue_dir / "hypotheses.md"
+        if hypotheses_path.exists():
+            print(
+                f"Hypothesis generator: '{hypotheses_path}' already exists; "
+                "skipping generation."
+            )
+            return {"write_status": True}
         final_state = await self.workflow.ainvoke({
             "issue_dir": str(self.issue_dir),
             "domain_knowledge": str(self.domain_knowledge),

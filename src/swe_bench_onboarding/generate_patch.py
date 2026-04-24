@@ -60,7 +60,11 @@ def _find_agent_executable() -> str:
 
 
 def _run_agent(
-    repo_path: Path, prompt: str, *, quiet: bool = False
+    repo_path: Path,
+    prompt: str,
+    *,
+    quiet: bool = False,
+    model: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke Cursor Agent in headless print mode so file changes are applied (not only proposed).
 
@@ -75,8 +79,11 @@ def _run_agent(
         "--force",
         "--workspace",
         str(repo_path),
-        prompt,
     ]
+    m = (model or "").strip()
+    if m:
+        cmd.extend(["--model", m])
+    cmd.append(prompt)
     start = time.perf_counter()
     proc = subprocess.Popen(
         cmd,
@@ -191,6 +198,7 @@ def generate_patch_for_bench_instance(
     diagnosis_path: Union[Path, str, None] = None,
     *,
     model_name: str = "cursor",
+    model: str | None = None,
     quiet: bool = False,
 ) -> str:
     """
@@ -201,6 +209,8 @@ def generate_patch_for_bench_instance(
     ``issue_dir_path`` must contain ``issue_details.json`` and ``bench_config.json`` (see onboarding export layout).
     After the diff is captured, runs ``git reset --hard HEAD`` to discard agent edits, then
     ``git switch -`` so the repo returns to the previous branch/HEAD.
+
+    If ``model`` is set, it is forwarded to the Cursor Agent as ``--model``.
 
     Requires the ``agent`` binary on ``PATH`` (install: https://cursor.com/docs/cli/installation).
     Set ``CURSOR_API_KEY`` for authentication in scripts
@@ -269,7 +279,7 @@ def generate_patch_for_bench_instance(
             "running Cursor Agent (-p --force); this may take a long time …",
             quiet=quiet,
         )
-        proc = _run_agent(repo_path, prompt, quiet=quiet)
+        proc = _run_agent(repo_path, prompt, quiet=quiet, model=model)
         if proc.returncode != 0:
             raise RuntimeError(
                 "Cursor Agent exited with non-zero status "
@@ -356,6 +366,11 @@ def main() -> int:
         help="Value written to model_name_or_path (default: %(default)s)",
     )
     parser.add_argument(
+        "--model",
+        default=None,
+        help="Cursor Agent CLI model id (passed as --model to the agent binary).",
+    )
+    parser.add_argument(
         "--print-patch",
         action="store_true",
         help="Print the unified diff to stdout after a successful run",
@@ -373,6 +388,7 @@ def main() -> int:
             args.bench_predictions_path,
             diagnosis_path=args.diagnosis_path,
             model_name=args.model_name,
+            model=args.model,
             quiet=args.quiet,
         )
     except (OSError, RuntimeError, ValueError) as e:

@@ -122,7 +122,7 @@ class HypothesisInvestigator:
 
     class State(TypedDict):
         issue_details: dict
-        issue_diagnosis: str
+        issue_hypotheses: str
         file_analysis: str
         hypothesis_analysis: dict
         tool_use: list[dict[str, Any]]
@@ -156,19 +156,19 @@ class HypothesisInvestigator:
         self.workflow = None
 
     def load_context(self, state: State) -> dict:
-        """Load issue JSON, diagnosis.md (including hypotheses), and file_analysis from domain knowledge."""
+        """Load issue JSON, hypotheses.md, and file_analysis from domain knowledge."""
         issue_dir = Path(self.issue_dir)
         issue_details_path = issue_dir / "issue_details.json"
         with open(issue_details_path, encoding="utf-8") as f:
             issue_details = json.load(f)
-        diagnosis_path = issue_dir / "diagnosis.md"
-        diagnosis = read_file(str(diagnosis_path))
+        hypotheses_path = issue_dir / "hypotheses.md"
+        hypotheses = read_file(str(hypotheses_path))
         file_analysis = read_file(
             str(Path(self.domain_knowledge_dir) / "file_analysis.md")
         )
         return {
             "issue_details": issue_details,
-            "issue_diagnosis": diagnosis,
+            "issue_hypotheses": hypotheses,
             "file_analysis": file_analysis,
         }
 
@@ -181,7 +181,7 @@ class HypothesisInvestigator:
 
         prompt = get_hypothesis_investigator_prompt(
             bug_report=bug_report,
-            diagnosis_and_hypotheses=state["issue_diagnosis"],
+            diagnosis_and_hypotheses=state["issue_hypotheses"],
             file_analysis=state["file_analysis"],
         )
         print("Hypothesis investigator: running analysis agent...")
@@ -279,8 +279,14 @@ class HypothesisInvestigator:
     async def run(self) -> State:
         if self.workflow is None:
             self.build_workflow()
+        diagnosis_path = Path(self.issue_dir) / "diagnosis.md"
+        if diagnosis_path.exists():
+            print(
+                f"Hypothesis investigator: '{diagnosis_path}' already exists; "
+                "skipping investigation."
+            )
+            return {"tool_use": []}
         final_state = await self.workflow.ainvoke({})
-        # print(f"Hypothesis investigator: tool use: {final_state['tool_use']}")
         return final_state
 
 

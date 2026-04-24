@@ -7,6 +7,7 @@ if __name__ == "__main__":
 import argparse
 import asyncio
 import json
+import time
 import urllib.error
 import urllib.request
 from typing_extensions import TypedDict
@@ -17,6 +18,8 @@ from agents.hypothesis_generator import HypothesisGenerator
 from agents.hypothesis_investigator import HypothesisInvestigator
 from utils.config import default_config_path, load_config, require_github_token
 from utils import fetch_issue_comments, parse_github_issue_url, save_issue_details_to_json
+
+HYPOTHESIS_STAGE_WAIT_SECONDS = 60
 
 
 class BugAnalysisWorkflow:
@@ -152,12 +155,24 @@ class BugAnalysisWorkflow:
         print("Bug Analysis Workflow: hypothesis investigation finished")
         return {}
 
+    def wait_before_hypothesis_investigator(self, state: State) -> dict:
+        print(
+            "Bug Analysis Workflow: waiting "
+            f"{HYPOTHESIS_STAGE_WAIT_SECONDS}s before hypothesis investigator"
+        )
+        time.sleep(HYPOTHESIS_STAGE_WAIT_SECONDS)
+        return {}
+
     def build_workflow(self) -> None:
         workflow = StateGraph(self.State)
         workflow.add_node("load_issue_path", self.load_issue_path)
         workflow.add_node("parse_issue_url", self.parse_issue_url)
         workflow.add_node("fetch_issue_metadata", self.fetch_issue_metadata)
         workflow.add_node("run_hypothesis_generator", self.run_hypothesis_generator)
+        workflow.add_node(
+            "wait_before_hypothesis_investigator",
+            self.wait_before_hypothesis_investigator,
+        )
         workflow.add_node("run_hypothesis_investigator", self.run_hypothesis_investigator)
 
         workflow.add_conditional_edges(
@@ -171,7 +186,12 @@ class BugAnalysisWorkflow:
         workflow.add_edge("load_issue_path", "run_hypothesis_generator")
         workflow.add_edge("parse_issue_url", "fetch_issue_metadata")
         workflow.add_edge("fetch_issue_metadata", "run_hypothesis_generator")
-        workflow.add_edge("run_hypothesis_generator", "run_hypothesis_investigator")
+        workflow.add_edge(
+            "run_hypothesis_generator", "wait_before_hypothesis_investigator"
+        )
+        workflow.add_edge(
+            "wait_before_hypothesis_investigator", "run_hypothesis_investigator"
+        )
         workflow.add_edge("run_hypothesis_investigator", END)
         self.workflow = workflow.compile()
 
