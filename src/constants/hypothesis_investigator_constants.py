@@ -57,6 +57,9 @@ INVESTIGATION_ANALYSIS_SCHEMA = {
     ],
 }
 
+FORCE_CONVERGENCE_PROMPT = """
+We have run out of token usage. Please write your investigation result with the available information.
+"""
 
 def get_hypothesis_investigator_prompt(
     bug_report: str,

@@ -2,7 +2,7 @@
 
 model_name: gemini-3-flash-preview
 model_provider: google_genai
-model_context_window: 1000000
+model_context_window: 1000000 # 1M
 
 # API key: literal, or exactly $VAR_NAME / ${VAR_NAME} to read that environment variable.
 api_key: $GEMINI_API_KEY
