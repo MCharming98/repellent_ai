@@ -26,6 +26,7 @@ if str(_src_root) not in sys.path:
 
 ISSUE_DETAILS_JSON = "issue_details.json"
 BENCH_CONFIG_JSON = "bench_config.json"
+AGENT_TIMEOUT_SECONDS = 600
 
 
 def _status(msg: str, *, quiet: bool) -> None:
@@ -33,7 +34,7 @@ def _status(msg: str, *, quiet: bool) -> None:
         print(f"[generate_patch] {msg}", file=sys.stderr, flush=True)
 
 
-def _build_agent_prompt(issue_details_text: str, diagnosis_text: str | None = None) -> str:
+def _build_agent_prompt(issue_details_text: str, extra_context: str | None = None) -> str:
     prompt = (
         "You are fixing a bug in this git repository at the checked-out commit.\n"
         "Read the issue details and implement the minimal correct fix by editing "
@@ -41,9 +42,29 @@ def _build_agent_prompt(issue_details_text: str, diagnosis_text: str | None = No
         "After your edits, the harness will record the change as a git unified diff.\n\n"
         f"Issue details:\n{issue_details_text}\n"
     )
-    if diagnosis_text:
-        prompt += f"\nDiagnosis context:\n{diagnosis_text}\n"
+    if extra_context:
+        prompt += f"\nHypotheses and diagnosis context:\n{extra_context}\n"
     return prompt
+
+
+def _load_merged_hypotheses_and_diagnosis(issue_dir: Path) -> str:
+    """Load ``hypotheses.md`` and ``diagnosis.md`` from ``issue_dir`` and merge for the agent prompt."""
+    hypotheses_path = issue_dir / "hypotheses.md"
+    diagnosis_path = issue_dir / "diagnosis.md"
+    blocks: list[str] = []
+    if hypotheses_path.is_file():
+        blocks.append(
+            "# hypotheses.md\n\n" + hypotheses_path.read_text(encoding="utf-8").rstrip() + "\n"
+        )
+    if diagnosis_path.is_file():
+        blocks.append(
+            "# diagnosis.md\n\n" + diagnosis_path.read_text(encoding="utf-8").rstrip() + "\n"
+        )
+    if not blocks:
+        raise FileNotFoundError(
+            f"No hypotheses.md or diagnosis.md found under issue_dir: {issue_dir}"
+        )
+    return "\n---\n\n".join(blocks).rstrip() + "\n"
 
 
 def _find_agent_executable() -> str:
@@ -113,7 +134,14 @@ def _run_agent(
         tick = threading.Thread(target=_wait_progress, daemon=True)
         tick.start()
     try:
+        stdout, stderr = proc.communicate(timeout=AGENT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        proc.kill()
         stdout, stderr = proc.communicate()
+        raise RuntimeError(
+            f"Cursor Agent timed out after {AGENT_TIMEOUT_SECONDS}s.\n"
+            f"Partial stdout:\n{stdout}\nPartial stderr:\n{stderr}"
+        )
     finally:
         if tick is not None:
             stop_event.set()
@@ -195,8 +223,8 @@ def generate_patch_for_bench_instance(
     repo_path: Union[Path, str],
     issue_dir_path: Union[Path, str],
     bench_predictions_path: Union[Path, str],
-    diagnosis_path: Union[Path, str, None] = None,
     *,
+    include_diagnosis: bool = False,
     model_name: str = "cursor",
     model: str | None = None,
     quiet: bool = False,
@@ -210,6 +238,9 @@ def generate_patch_for_bench_instance(
     After the diff is captured, runs ``git reset --hard HEAD`` to discard agent edits, then
     ``git switch -`` so the repo returns to the previous branch/HEAD.
 
+    If ``include_diagnosis`` is true, ``hypotheses.md`` and ``diagnosis.md`` under the issue
+    directory are merged (each file is included if it exists) and appended to the agent prompt.
+
     If ``model`` is set, it is forwarded to the Cursor Agent as ``--model``.
 
     Requires the ``agent`` binary on ``PATH`` (install: https://cursor.com/docs/cli/installation).
@@ -222,7 +253,6 @@ def generate_patch_for_bench_instance(
     repo_path = Path(repo_path).resolve()
     issue_dir = Path(issue_dir_path).resolve()
     bench_predictions_path = Path(bench_predictions_path).resolve()
-    diagnosis_file = Path(diagnosis_path).resolve() if diagnosis_path else None
 
     if not issue_dir.is_dir():
         raise NotADirectoryError(f"issue_dir_path is not a directory: {issue_dir}")
@@ -240,11 +270,9 @@ def generate_patch_for_bench_instance(
 
     issue_details = json.loads(issue_details_path.read_text(encoding="utf-8"))
     bench_config = json.loads(bench_config_path.read_text(encoding="utf-8"))
-    diagnosis_text: str | None = None
-    if diagnosis_file is not None:
-        if not diagnosis_file.is_file():
-            raise FileNotFoundError(f"diagnosis_path is not a file: {diagnosis_file}")
-        diagnosis_text = diagnosis_file.read_text(encoding="utf-8")
+    extra_context: str | None = None
+    if include_diagnosis:
+        extra_context = _load_merged_hypotheses_and_diagnosis(issue_dir)
 
     instance_id = bench_config.get("instance_id")
     commit_hash = bench_config.get("commit_hash")
@@ -261,8 +289,11 @@ def generate_patch_for_bench_instance(
         f"instance_id={instance_id.strip()!r} repo={repo_path} issue_dir={issue_dir}",
         quiet=quiet,
     )
-    if diagnosis_file is not None:
-        _status(f"using diagnosis file: {diagnosis_file}", quiet=quiet)
+    if include_diagnosis:
+        _status(
+            "embedding hypotheses.md and/or diagnosis.md from issue_dir into prompt",
+            quiet=quiet,
+        )
     _status(f"bench commit {ch[:12]}…", quiet=quiet)
 
     _status("git checkout -f <bench commit>", quiet=quiet)
@@ -274,7 +305,7 @@ def generate_patch_for_bench_instance(
     _status("checkout complete", quiet=quiet)
 
     try:
-        prompt = _build_agent_prompt(str(issue_details), diagnosis_text=diagnosis_text)
+        prompt = _build_agent_prompt(str(issue_details), extra_context=extra_context)
         _status(
             "running Cursor Agent (-p --force); this may take a long time …",
             quiet=quiet,
@@ -355,10 +386,12 @@ def main() -> int:
         help="Path to SWE-bench predictions JSON to update",
     )
     parser.add_argument(
-        "--diagnosis_path",
-        type=Path,
-        default=None,
-        help="Optional path to diagnosis markdown/text file included in the prompt",
+        "--include_diagnosis",
+        action="store_true",
+        help=(
+            "If set, read hypotheses.md and diagnosis.md from --issue_dir (each if present), "
+            "merge them, and add the result to the agent prompt."
+        ),
     )
     parser.add_argument(
         "--model-name",
@@ -386,7 +419,7 @@ def main() -> int:
             args.repo_path,
             args.issue_dir,
             args.bench_predictions_path,
-            diagnosis_path=args.diagnosis_path,
+            include_diagnosis=args.include_diagnosis,
             model_name=args.model_name,
             model=args.model,
             quiet=args.quiet,
