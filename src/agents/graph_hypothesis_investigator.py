@@ -24,6 +24,7 @@ from constants.hypothesis_investigator_constants import (
     get_hypothesis_investigator_prompt,
 )
 from utils import checkout, format_key_to_subheading, read_file, write_to_file
+from utils.config import default_config_path, get_investigation_max_token_usage, load_config
 from utils.langchain import (
     _RATE_LIMIT_WAIT_SECONDS,
     aggregate_token_usage_from_messages,
@@ -37,7 +38,6 @@ _INVESTIGATION_MARKDOWN_KEY_ORDER = tuple(INVESTIGATION_ANALYSIS_SCHEMA["require
 
 BENCH_CONFIG_JSON = "bench_config.json"
 _RATE_LIMIT_MAX_ATTEMPTS = 1
-_MAX_TOKEN_USAGE = 5_000_000
 _INVESTIGATION_RECURSION_LIMIT = 10
 
 
@@ -144,6 +144,7 @@ class GraphHypothesisInvestigator:
         model: str,
         model_provider: str,
         api_key: str,
+        max_token_usage: int,
     ) -> None:
         issue_path = _resolved_issue_dir(issue_dir)
         self.issue_dir = str(issue_path)
@@ -152,6 +153,7 @@ class GraphHypothesisInvestigator:
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
+        self.max_token_usage = max_token_usage
         self.commit_hash = _commit_hash_from_bench_config(issue_path)
 
         self.investigator_agent = get_llm_agent(
@@ -225,7 +227,7 @@ class GraphHypothesisInvestigator:
         result: dict[str, Any] = {}
         token_usage = 0
 
-        while token_usage < _MAX_TOKEN_USAGE:
+        while token_usage < self.max_token_usage:
             try:
                 for chunk in self.investigator_agent.stream(
                     {"messages": messages},
@@ -283,7 +285,7 @@ class GraphHypothesisInvestigator:
         issue_dir = Path(self.issue_dir)
         diagnosis_path = str(issue_dir / "diagnosis.md")
         md = format_investigation_analysis_to_markdown(state["hypothesis_analysis"])
-        block = "\n\n---\n\n## Investigation analysis\n\n" + md
+        block = "## Investigation analysis\n\n" + md
         write_to_file(diagnosis_path, block, mode="a")
         print(f"Hypothesis investigator: appended investigation analysis to {diagnosis_path}")
         return {}
@@ -351,6 +353,9 @@ def main() -> None:
     parser.add_argument("--api-key", required=True)
     args = parser.parse_args()
 
+    cfg = load_config(default_config_path())
+    max_token_usage = get_investigation_max_token_usage(cfg)
+
     investigator = GraphHypothesisInvestigator(
         issue_dir=args.issue_dir,
         source_dir=args.source_dir,
@@ -358,6 +363,7 @@ def main() -> None:
         model=args.model,
         model_provider=args.model_provider,
         api_key=args.api_key,
+        max_token_usage=max_token_usage,
     )
     investigator.build_workflow()
     asyncio.run(investigator.run())

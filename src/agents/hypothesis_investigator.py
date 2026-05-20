@@ -260,7 +260,7 @@ class HypothesisInvestigator:
         issue_dir = Path(self.issue_dir)
         diagnosis_path = str(issue_dir / "diagnosis.md")
         md = format_investigation_analysis_to_markdown(state["hypothesis_analysis"])
-        block = "\n\n---\n\n## Investigation analysis\n\n" + md
+        block = "## Investigation analysis\n\n" + md
         write_to_file(diagnosis_path, block, mode="a")
         print(f"Hypothesis investigator: appended investigation analysis to {diagnosis_path}")
         return {}

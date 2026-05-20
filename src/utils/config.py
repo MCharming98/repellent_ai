@@ -69,6 +69,22 @@ def require_github_token(cfg: dict[str, Any]) -> str:
     return token
 
 
+def get_investigation_max_token_usage(cfg: dict[str, Any]) -> int:
+    """Cumulative token budget for hypothesis investigation before forced convergence."""
+    raw = cfg.get("investigation_max_token_usage", 5_000_000)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"config `investigation_max_token_usage` must be an integer, got {raw!r}"
+        ) from e
+    if n <= 0:
+        raise ValueError(
+            f"config `investigation_max_token_usage` must be positive, got {n}"
+        )
+    return n
+
+
 def get_model_context_window(cfg: dict[str, Any]) -> int:
     """Maximum input context length for the configured model (``model_context_window`` in YAML; required)."""
     if "model_context_window" not in cfg or cfg.get("model_context_window") is None:

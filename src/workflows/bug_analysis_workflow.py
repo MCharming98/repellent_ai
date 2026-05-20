@@ -14,9 +14,14 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from agents.graph_hypothesis_investigator import GraphHypothesisInvestigator
 from agents.hypothesis_generator import HypothesisGenerator
-from agents.hypothesis_investigator import HypothesisInvestigator
-from utils.config import default_config_path, load_config, require_github_token
+from utils.config import (
+    default_config_path,
+    get_investigation_max_token_usage,
+    load_config,
+    require_github_token,
+)
 from utils import fetch_issue_comments, parse_github_issue_url, save_issue_details_to_json
 
 HYPOTHESIS_STAGE_WAIT_SECONDS = 60
@@ -49,6 +54,7 @@ class BugAnalysisWorkflow:
         model: str,
         model_provider: str,
         api_key: str,
+        max_token_usage: int,
         github_token: str = "",
     ) -> None:
         self.issue_url = issue_url or ""
@@ -60,6 +66,7 @@ class BugAnalysisWorkflow:
         self.model_provider = model_provider
         self.api_key = api_key
         self.github_token = github_token
+        self.max_token_usage = max_token_usage
         self.workflow = None
 
     def _entrypoint(self, state: State) -> str:
@@ -141,14 +148,15 @@ class BugAnalysisWorkflow:
         return {}
 
     def run_hypothesis_investigator(self, state: State) -> dict:
-        print("Bug Analysis Workflow: running hypothesis investigator (reads diagnosis.md)")
-        investigator = HypothesisInvestigator(
+        print("Bug Analysis Workflow: running graph hypothesis investigator")
+        investigator = GraphHypothesisInvestigator(
             issue_dir=state["issue_dir"],
             source_dir=state["source_dir"],
             domain_knowledge_dir=state["domain_knowledge_dir"],
             model=state["model"],
             model_provider=state["model_provider"],
             api_key=state["api_key"],
+            max_token_usage=self.max_token_usage,
         )
         investigator.build_workflow()
         asyncio.run(investigator.run())
@@ -262,7 +270,9 @@ def main() -> None:
     if not args.issue_url and not args.issue_path:
         parser.error("one of --issue-url or --issue-path is required")
 
-    github_token = require_github_token(load_config(default_config_path()))
+    cfg = load_config(default_config_path())
+    github_token = require_github_token(cfg)
+    max_token_usage = get_investigation_max_token_usage(cfg)
 
     workflow = BugAnalysisWorkflow(
         issue_url=args.issue_url or "",
@@ -273,6 +283,7 @@ def main() -> None:
         model=args.model,
         model_provider=args.model_provider,
         api_key=args.api_key,
+        max_token_usage=max_token_usage,
         github_token=github_token,
     )
     workflow.run()

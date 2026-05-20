@@ -4,6 +4,7 @@ from pathlib import Path
 
 from utils.config import (
     default_config_path,
+    get_investigation_max_token_usage,
     get_model_context_window,
     load_config,
     load_runtime_settings,
@@ -49,6 +50,7 @@ def _run_analyze(
     """Run bug analysis from a GitHub issue URL or local issue directory path."""
     cfg = load_config(default_config_path())
     model_name, model_provider, api_key, github_token = load_runtime_settings(cfg)
+    max_token_usage = get_investigation_max_token_usage(cfg)
 
     if issue_path:
         issue_dir = Path(issue_path).resolve()
@@ -78,6 +80,7 @@ def _run_analyze(
         model=model_name,
         model_provider=model_provider,
         api_key=api_key,
+        max_token_usage=max_token_usage,
         github_token=github_token,
     )
     workflow.build_workflow()
