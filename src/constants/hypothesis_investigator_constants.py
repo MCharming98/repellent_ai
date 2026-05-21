@@ -36,7 +36,7 @@ INVESTIGATION_ANALYSIS_SCHEMA = {
         },
         "final_verdict": {
             "type": "string",
-            "description": "The most likely hypothesis based on the hypothesis resolutions, or inconclusive if no hypothesis is clearly more likely.",
+            "description": "One sentence: root cause (or inconclusive) and the immediate next action for an engineer.",
         },
         "next_steps": {
             "type": "array",
@@ -133,13 +133,19 @@ def get_hypothesis_investigator_prompt(
     - Key evidence (only decisive signals)
 
     6. Final Verdict
-    - Based on the hypothesis resolutions, select the most likely hypothesis(es).
-    - If multiple hypotheses have strong evidence, return a combined verdict for all of them.
-    - If a single hypothesis is confirmed, restate the hypothesis as the final verdict.
-    - If no strong evidence for any hypothesis, return inconclusive.
-    - Record your final verdict in the output.
+    - Use one sentence to summarize the root cause (or say inconclusive)
+    - Include the most relevant hypothesis(the body, not the number), critical signal, and investigation results.
+    - Include relevant filenames and code blocks if applicable.
 
-    Convergence Control (Critical)
+    7. Next Steps
+    - If the final verdict is inconclusive, list unexecutable but high-value actions for further investigation.
+    - If the final verdict is confirmed: 
+        - suggest fixes if the issue is a bug.
+        - explain the intended behavior if the issue is not a bug.
+    - Record the next steps in the output.
+
+
+    ### Convergence Control (Critical)
     You MUST NOT finalize early, unless at least one hypothesis has:
     - Direct evidence confirming a necessary condition
     - No contradicting evidence
@@ -150,19 +156,13 @@ def get_hypothesis_investigator_prompt(
     **Correlation ≠ causation**
     **Partial matches ≠ validation**
 
-    7. Next Steps
-    - If the final verdict is inconclusive, list unexecutable but high-value actions for further investigation.
-    - If the final verdict is confirmed: 
-        - suggest fixes if the issue is a bug.
-        - explain the intended behavior if the issue is not a bug.
-    - Record the next steps in the output.
-
     ### Requirements
     Prefer falsification over confirmation
     Execute one experiment at a time
     Do not batch assumptions
     Do not converge early without decisive evidence
     Only read files mentioned in investigation actions
+    Write in markdown format
     
     ### Heuristics
     Untestable hypothesis → mark as weak
