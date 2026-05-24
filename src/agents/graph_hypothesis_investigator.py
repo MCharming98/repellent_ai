@@ -23,7 +23,7 @@ from constants.hypothesis_investigator_constants import (
     INVESTIGATION_ANALYSIS_SCHEMA,
     get_hypothesis_investigator_prompt,
 )
-from utils import checkout, format_key_to_subheading, read_file, write_to_file
+from utils import checkout, format_key_to_subheading, read_file, write_to_file, pull_from_repo
 from utils.config import default_config_path, get_investigation_max_token_usage, load_config
 from utils.langchain import (
     _RATE_LIMIT_WAIT_SECONDS,
@@ -173,6 +173,7 @@ class GraphHypothesisInvestigator:
             tools=[],
             response_format=ToolStrategy(INVESTIGATION_ANALYSIS_SCHEMA),
         )
+
     def load_context(self, state: State) -> dict:
         """Load issue JSON, hypotheses.md, and file_analysis from domain knowledge."""
         issue_dir = Path(self.issue_dir)
@@ -207,13 +208,14 @@ class GraphHypothesisInvestigator:
         """Check out the working commit if it exists."""
         cwd = os.getcwd()
         os.chdir(self.source_dir)
-        print(f"Hypothesis investigator: current working directory: {cwd}")
+        pull_from_repo()
+        print(f"Hypothesis investigator: changed working directory to: {self.source_dir} and updated to the latest commit")
+        
         if self.commit_hash:
             print(
                 f"Hypothesis investigator: checking out commit {self.commit_hash}"
             )
             checkout(self.commit_hash)
-        print(f"Hypothesis investigator: changed working directory to: {self.source_dir}")
         return {"cwd": cwd}
 
     def start_perf_counter(self, state: State) -> dict:

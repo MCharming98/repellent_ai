@@ -20,7 +20,7 @@ from constants.hypothesis_investigator_constants import (
     INVESTIGATION_ANALYSIS_SCHEMA,
     get_hypothesis_investigator_prompt,
 )
-from utils import checkout, format_key_to_subheading, read_file, write_to_file
+from utils import checkout, format_key_to_subheading, read_file, write_to_file, pull_from_repo
 from utils.langchain import (
     _RATE_LIMIT_WAIT_SECONDS,
     aggregate_token_usage_from_messages,
@@ -126,6 +126,7 @@ class HypothesisInvestigator:
         file_analysis: str
         hypothesis_analysis: dict
         tool_use: list[dict[str, Any]]
+        cwd: str
 
     def __init__(
         self,
@@ -172,6 +173,14 @@ class HypothesisInvestigator:
             "file_analysis": file_analysis,
         }
 
+    def update_repo(self) -> dict:
+        """Update the repository to the latest commit."""
+        cwd = os.getcwd()
+        os.chdir(self.source_dir)
+        pull_from_repo()
+        print(f"Hypothesis investigator: changed working directory to: {self.source_dir} and updated the repository to the latest commit")
+        return {"cwd": cwd}
+
     def analyze_hypothesis(self, state: State) -> dict:
         """Run the investigator agent with structured investigation output."""
         issue_details = state["issue_details"]
@@ -186,10 +195,6 @@ class HypothesisInvestigator:
         )
         print("Hypothesis investigator: running analysis agent...")
         start_time = time.perf_counter()
-        prev_cwd = os.getcwd()
-        print(f"Hypothesis investigator: current working directory: {prev_cwd}")
-        os.chdir(self.source_dir)
-        print(f"Hypothesis investigator: changed working directory to: {self.source_dir}")
         try:
             if self.commit_hash:
                 print(
@@ -220,8 +225,8 @@ class HypothesisInvestigator:
             # Restore git state while cwd is still ``source_dir`` (``checkout`` uses cwd).
             if self.commit_hash:
                 checkout("latest")
-            os.chdir(prev_cwd)
-            print(f"Hypothesis investigator: restored working directory to: {prev_cwd}")
+            os.chdir(state["cwd"])
+            print(f"Hypothesis investigator: restored working directory to: {state['cwd']}")
         elapsed = time.perf_counter() - start_time
         messages_for_usage = result.get("messages") or []
         usage = aggregate_token_usage_from_messages(messages_for_usage)
@@ -270,8 +275,10 @@ class HypothesisInvestigator:
         workflow.add_node("load_context", self.load_context)
         workflow.add_node("analyze_hypothesis", self.analyze_hypothesis)
         workflow.add_node("append_hypothesis_analysis_to_file", self.append_hypothesis_analysis_to_file)
+        workflow.add_node("update_repo", self.update_repo)
         workflow.add_edge(START, "load_context")
-        workflow.add_edge("load_context", "analyze_hypothesis")
+        workflow.add_edge("load_context", "update_repo")
+        workflow.add_edge("update_repo", "analyze_hypothesis")
         workflow.add_edge("analyze_hypothesis", "append_hypothesis_analysis_to_file")
         workflow.add_edge("append_hypothesis_analysis_to_file", END)
         self.workflow = workflow.compile()

@@ -142,6 +142,26 @@ def clone_github_repo(url: str, path: str) -> None:
     return
 
 
+def pull_from_repo(repo_path: str | None = None) -> None:
+    """
+    Run ``git pull`` in a repository.
+
+    Args:
+        repo_path: Git repository root. If omitted, uses the current working directory.
+
+    Raises:
+        RuntimeError: If ``git pull`` fails.
+    """
+    kwargs: dict[str, Any] = {"capture_output": True, "text": True}
+    if repo_path is not None:
+        kwargs["cwd"] = str(Path(repo_path).expanduser().resolve())
+
+    pull = subprocess.run(["git", "pull"], **kwargs)
+    if pull.returncode != 0:
+        err = (pull.stderr or pull.stdout or "").strip()
+        raise RuntimeError(f"git pull failed: {err}")
+
+
 def extract_issue_fields(
     issues: Union[List[Dict[str, Any]], str, Path],
 ) -> List[Dict[str, Any]]:
