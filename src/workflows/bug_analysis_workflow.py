@@ -22,7 +22,12 @@ from utils.config import (
     load_config,
     require_github_token,
 )
-from utils import fetch_issue_comments, parse_github_issue_url, save_issue_details_to_json
+from utils import (
+    fetch_issue_comments,
+    get_issue_labels,
+    parse_github_issue_url,
+    save_issue_details_to_json,
+)
 
 HYPOTHESIS_STAGE_WAIT_SECONDS = 60
 
@@ -135,12 +140,21 @@ class BugAnalysisWorkflow:
     def run_hypothesis_generator(self, state: State) -> dict:
         issue_dir = Path(state["issue_dir"])
         print(f"Bug Analysis Workflow: running hypothesis generator for {issue_dir}")
+        try:
+            repo_labels = get_issue_labels(state["source_dir"])
+            print(
+                f"Bug Analysis Workflow: loaded {len(repo_labels)} repo label definition(s)"
+            )
+        except (ValueError, RuntimeError) as e:
+            print(f"Bug Analysis Workflow: could not load repo labels ({e}); continuing")
+            repo_labels = {}
         agent = HypothesisGenerator(
             issue_dir=str(issue_dir),
             domain_knowledge=state["domain_knowledge_dir"],
             model=state["model"],
             model_provider=state["model_provider"],
             api_key=state["api_key"],
+            issue_labels=repo_labels,
         )
         agent.build_workflow()
         asyncio.run(agent.run())

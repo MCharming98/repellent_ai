@@ -37,7 +37,7 @@ from utils import (
 )
 
 
-_SUMMARY_SECTION_KEYS = ("symptom_observed", "divergence_point", "issue_type")
+_SUMMARY_SECTION_KEYS = ("symptom_observed", "divergence_point", "issue_type", "issue_labels")
 
 _ATTACHMENT_BASENAME_SAFE = re.compile(r"[^\w.\-]+")
 
@@ -53,6 +53,20 @@ def _combined_issue_markdown(issue_details: dict) -> str:
         if isinstance(c, dict):
             parts.append(str(c.get("body") or ""))
     return "\n\n".join(parts)
+
+
+def _format_repo_issue_labels_for_prompt(issue_labels: dict[str, str]) -> str:
+    """Format repository label definitions (name -> description) for the triage prompt."""
+    if not issue_labels:
+        return "(none defined or not provided)"
+    lines: list[str] = []
+    for name, description in sorted(issue_labels.items()):
+        desc = (description or "").strip()
+        if desc:
+            lines.append(f"- {name}: {desc}")
+        else:
+            lines.append(f"- {name}")
+    return "\n".join(lines)
 
 
 def _format_issue_comments_for_prompt(issue_details: dict) -> str:
@@ -128,6 +142,21 @@ def _build_saved_filename(
     return f"attachment{ext}"
 
 
+def _format_issue_labels_section_markdown(val: dict) -> str:
+    """Render suggested labels and rationale for hypotheses.md."""
+    lines: list[str] = []
+    labels = val.get("labels") or []
+    if isinstance(labels, list) and labels:
+        for label in labels:
+            lines.append(f"- {label}")
+        lines.append("")
+    rationale = str(val.get("rationale") or "").strip()
+    if rationale:
+        lines.append(rationale)
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def _format_issue_hypotheses_markdown(data: dict) -> str:
     """Render full hypotheses.md: triage sections plus all diagnose hypotheses."""
     blocks: list[str] = []
@@ -136,7 +165,11 @@ def _format_issue_hypotheses_markdown(data: dict) -> str:
             continue
         val = data[key]
         blocks.append(f"## {format_key_to_subheading(key)}\n")
-        if isinstance(val, dict):
+        if key == "issue_labels" and isinstance(val, dict):
+            section = _format_issue_labels_section_markdown(val)
+            if section:
+                blocks.append(section)
+        elif isinstance(val, dict):
             blocks.append(str(val.get("analysis", "")).strip())
             blocks.append("")
             blocks.append(f"Confidence score: {val.get('confidence_score', '')}")
@@ -188,12 +221,21 @@ class HypothesisGenerator:
         issue_hypotheses: str
         write_status: bool
 
-    def __init__(self, issue_dir: str, domain_knowledge: str, model: str, model_provider: str, api_key: str):
+    def __init__(
+        self,
+        issue_dir: str,
+        domain_knowledge: str,
+        model: str,
+        model_provider: str,
+        api_key: str,
+        issue_labels: dict[str, str] | None = None,
+    ):
         self.issue_dir = Path(issue_dir)
         self.domain_knowledge = Path(domain_knowledge)
         self.model = model
         self.model_provider = model_provider
         self.api_key = api_key
+        self.issue_labels = dict(issue_labels or {})
         model_kwargs = {"api_key": api_key}
         # Default to Google Developer API instead of Vertex AI
         if model_provider == "google_genai":
@@ -341,6 +383,7 @@ class HypothesisGenerator:
             attachment_section=attachment_section,
             file_analysis=file_analysis,
             business_analysis=business_analysis,
+            issue_labels=_format_repo_issue_labels_for_prompt(self.issue_labels),
         )
         image_blocks = []
         for image_url in issue_images:

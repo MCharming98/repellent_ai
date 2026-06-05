@@ -45,6 +45,24 @@ ISSUE_DIAGNOSES_SCHEMA = {
             },
             "required": ["analysis", "confidence_score"],
         },
+        "issue_labels": {
+            "type": "object",
+            "properties": {
+                "labels": {
+                    "type": "array",
+                    "description": "The list of issue labels",
+                    "items": {
+                        "type": "string",
+                        "description": "The label name",
+                    },
+                },
+                "rationale": {
+                    "type": "string",
+                    "description": "The rationale of the issue labels",
+                },
+            },
+            "required": ["labels", "rationale"],
+        },
         "diagnose_hypothesis": {
             "type": "array",
             "description": "The list of diagnose hypothesis and recommended actions for the issue",
@@ -72,7 +90,7 @@ ISSUE_DIAGNOSES_SCHEMA = {
             },
         },
     },
-    "required": ["symptom_observed", "divergence_point", "issue_type", "diagnose_hypothesis"],
+    "required": ["symptom_observed", "divergence_point", "issue_type", "issue_labels", "diagnose_hypothesis"],
 }
 
 
@@ -84,6 +102,7 @@ def get_hypothesis_generator_prompt(
     attachment_section: str,
     file_analysis: str,
     business_analysis: str,
+    issue_labels: str,
 ) -> str:
     """Build the issue-triage prompt for hypothesis generation."""
     return f"""
@@ -101,7 +120,10 @@ def get_hypothesis_generator_prompt(
                 - Hypothesize the type of the issue: a bug, expected behavior, UX issue, or a feature request.
                 - Explain your rationale in one sentence.
                 - Assign your issue type analysis a confidence score.
-            4. Diagnose Hypothesis and Investigation Actions
+            4. Issue Labels
+                - Given the defined issue labels for this repository, suggest appropriate labels to classify this issue.
+                - Explain your rationale in one sentence.
+            5. Diagnose Hypothesis and Investigation Actions
                 - List up to 3 hypotheses that are mutually distinct in root cause, not variations of the same issue.
                 - For each hypothesis, provide the following:
                     1. Mechanism analysis:
@@ -130,6 +152,7 @@ def get_hypothesis_generator_prompt(
             Issue Description: {issue_description}
             {comments_section}
             {attachment_section}
+            Available Issue labels: {issue_labels}
             Domain knowledge documents:
             File analysis: {file_analysis}
             Business analysis: {business_analysis}

@@ -78,6 +78,41 @@ def _github_clone_url(url: str) -> str:
     raise ValueError(f"Unrecognized GitHub repository URL: {url!r}")
 
 
+def _resolve_github_owner_repo(repo: str) -> Tuple[str, str]:
+    """
+    Resolve ``(owner, repo)`` from a GitHub URL, ``owner/repo``, or local clone path.
+
+    Raises:
+        ValueError: If owner/repo cannot be determined.
+    """
+    s = repo.strip().rstrip("/")
+    if not s:
+        raise ValueError("Repository URL or path is empty")
+
+    parsed = parse_github_repo_url(s)
+    if parsed:
+        return parsed
+
+    if "/" in s and "://" not in s and "github.com" not in s:
+        parts = [p for p in s.split("/") if p]
+        if len(parts) == 2:
+            return parts[0], parts[1].removesuffix(".git")
+
+    path = Path(s).expanduser()
+    if path.is_dir() and (path / ".git").exists():
+        result = subprocess.run(
+            ["git", "-C", str(path.resolve()), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            remote_parsed = parse_github_repo_url(result.stdout.strip())
+            if remote_parsed:
+                return remote_parsed
+
+    raise ValueError(f"Could not resolve GitHub owner/repo from: {repo!r}")
+
+
 def checkout(commit_hash: str) -> None:
     """
     Check out a git ref in the current working directory.
@@ -160,6 +195,62 @@ def pull_from_repo(repo_path: str | None = None) -> None:
     if pull.returncode != 0:
         err = (pull.stderr or pull.stdout or "").strip()
         raise RuntimeError(f"git pull failed: {err}")
+
+
+def get_issue_labels(
+    repo: str
+) -> Dict[str, str]:
+    """
+    Fetch repository label definitions (not labels attached to individual issues).
+
+    Uses ``GET /repos/{owner}/{repo}/labels`` — the set of labels configured on the repo.
+
+    Args:
+        repo: GitHub repo URL, ``owner/repo``, or local path to a git clone
+            (uses ``origin`` remote).
+        token: GitHub API token (optional; unauthenticated if omitted or empty).
+
+    Returns:
+        Mapping of label name to description (empty string if the label has none).
+
+    Raises:
+        ValueError: If owner/repo cannot be resolved from ``repo``.
+        RuntimeError: If a GitHub API request fails.
+    """
+    owner, repo_name = _resolve_github_owner_repo(repo)
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo_name}/labels"
+
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "Repellent-AI",
+    }
+    full_url = f"{url}?{urllib.parse.urlencode({'per_page': 100})}"
+    req = urllib.request.Request(full_url, headers=headers)
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            pass
+        detail = body or e.reason
+        raise RuntimeError(f"GitHub labels API failed ({e.code}): {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"GitHub labels API request failed: {e.reason}") from e
+
+    if not isinstance(payload, list):
+        raise RuntimeError(
+            f"GitHub labels API returned unexpected payload: {type(payload).__name__}"
+        )
+
+    return {
+        str(item["name"]): str(item.get("description") or "")
+        for item in payload
+        if isinstance(item, dict) and item.get("name")
+    }
 
 
 def extract_issue_fields(
