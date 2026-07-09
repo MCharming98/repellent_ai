@@ -1,25 +1,30 @@
 ---
 name: code-base-onboarding
 description: >-
-  Onboard a codebase into Repellent AI domain knowledge by cloning the repo,
-  estimating LLM token usage, and running the onboarding workflow. Use when the
+  Reads through a given codebase, generates domain knowledge documents (file,
+  business, and contributor analysis), and creates a companion skill so agents
+  can consult that domain knowledge when working on the repository. Use when the
   user asks to onboard a repository, build domain knowledge, run file/business/
   contributor analysis, or prepare a codebase for bug analysis.
 ---
 
 # Code Base Onboarding
 
-Self-contained skill under `skills/code-base-onboarding/`. All code, config, clones, and outputs live inside this directory — no imports or paths from the parent repository.
+Self-contained skill under `skills/code-base-onboarding/`. All code, config, clones, and workflow outputs live inside this directory — no imports or paths from the parent repository. Step 5 publishes a personal skill under the active agent's skills directory (for example `~/.claude/skills/` or `~/.cursor/skills/`).
 
 ## Layout
 
 ```
-skills/code-base-onboarding/
+code-base-onboarding/
 ├── SKILL.md
 ├── config.yaml
 ├── requirements.txt
 ├── projects/                # Cloned repositories (created at runtime)
-├── domain_knowledge/        # Generated docs (created at runtime)
+├── domain_knowledge/        # Generated docs from Step 4 (created at runtime)
+│   └── <project>/
+│       ├── file_analysis.md
+│       ├── business_analysis.md
+│       └── contributor_analysis.md
 └── scripts/
     ├── _paths.py            # Skill-root paths + sys.path setup
     ├── main.py              # Onboarding CLI (OnboardingWorkflow entry)
@@ -30,6 +35,13 @@ skills/code-base-onboarding/
     ├── agents/              # LLM agents (file analyzer)
     ├── constants/           # Prompts and schemas
     └── utils/               # Config, files, git, text, langchain helpers
+
+~/.<agent>/skills/<repo-name>-domain-knowledge/   # Published personal domain knowledge skill (Step 5)
+├── SKILL.md
+└── references/
+    ├── file_analysis.md
+    ├── business_analysis.md
+    └── contributor_analysis.md
 ```
 
 All Python modules under `scripts/` are imported via `scripts/_paths.py`:
@@ -52,6 +64,7 @@ Task Progress:
 - [ ] Step 2: Fetch target repo with git
 - [ ] Step 3: Estimate token usage and get user confirmation
 - [ ] Step 4: Run onboarding workflow and store domain knowledge
+- [ ] Step 5: Create domain knowledge skill
 ```
 
 ### Step 0: Install dependencies and configure
@@ -164,6 +177,100 @@ After completion, verify the three output files exist and report:
 - Output directory: `domain_knowledge/<project_name>/`
 - Per-stage status and aggregated token usage from the workflow summary logs
 
+### Step 5: Create domain knowledge skill
+
+After the three domain knowledge documents are generated in Step 4, package them as a Cursor skill so future agent sessions can discover and use the domain knowledge when working on the onboarded codebase.
+
+**Use the skill-creation skill if present.** Before writing files, check whether a skill-creation skill is available (e.g. `create-skill`). If it is, read and follow it for frontmatter, naming, descriptions, and file layout. Apply the domain-knowledge requirements below on top of that skill's guidance.
+
+**If no skill-creation skill is available**, create the skill as a personal skill under the active agent's skills directory:
+
+- If using Claude Code: `~/.claude/skills/`
+- If using Cursor: `~/.cursor/skills/`
+
+```
+~/.<agent>/skills/<repo-name>-domain-knowledge/
+├── SKILL.md
+└── references/
+    ├── file_analysis.md
+    ├── business_analysis.md
+    └── contributor_analysis.md
+```
+
+- `<repo-name>` is the onboarded project basename (e.g. `sqlfluff` → `~/.cursor/skills/sqlfluff-domain-knowledge/`).
+- Copy the three markdown files from `domain_knowledge/<project_name>/` into `references/`. Do not leave the domain knowledge only in `domain_knowledge/` — the skill's `references/` directory is the canonical home for agents.
+
+**`SKILL.md` content** — Create with YAML frontmatter and a markdown body. Use `<repo-name>-domain-knowledge` for `name` (lowercase, hyphenated). The `description` should mention the repository and that domain knowledge is available for bug analysis, feature work, and codebase navigation.
+
+The body must cover:
+
+1. **Source repository** — Identify the onboarded codebase:
+   - Repository name and path under `projects/<project_name>/` (relative to this skill root)
+   - Original GitHub URL or local path the user provided during intake (if known)
+   - When the domain knowledge was generated (onboarding date)
+
+2. **Domain knowledge documents** — Summarize what each file in `references/` contains and when to read it:
+
+   | File | Contents | Consult when |
+   |------|----------|--------------|
+   | `references/file_analysis.md` | Per-file structure, responsibilities, and relationships across the codebase | Navigating unfamiliar modules, tracing code paths, or understanding how files fit together |
+   | `references/business_analysis.md` | Product context, user journeys, and business logic | Understanding feature intent, user-facing behavior, or why code exists |
+   | `references/contributor_analysis.md` | Git contributor rollup and ownership patterns | Finding subject-matter experts, recent activity areas, or who to ask about specific parts of the repo |
+
+   Read each generated document and write accurate, project-specific summaries — do not copy the generic descriptions above verbatim.
+
+3. **Usage instructions** — Tell the agent to:
+   - Read this `SKILL.md` first when working on `<project_name>`
+   - Consult the files under `references/` as reference material before making changes
+   - Prefer domain knowledge over re-scanning the entire repository when the docs already answer the question
+   - Re-read relevant reference files when touching unfamiliar areas or making non-trivial changes
+
+**Example structure** (adapt names and paths to the onboarded project):
+
+```markdown
+---
+name: <repo-name>-domain-knowledge
+description: >-
+  Domain knowledge for <owner>/<repo>. Consult file, business, and contributor
+  analysis when working on this codebase — bug fixes, features, or navigation.
+---
+
+# <Project Name> Domain Knowledge
+
+## Source repository
+
+- **Local path:** `projects/<project_name>/` (under `skills/code-base-onboarding/`)
+- **Origin:** https://github.com/owner/repo
+- **Onboarded:** YYYY-MM-DD
+
+## Domain knowledge documents
+
+### references/file_analysis.md
+<Project-specific summary of file structure and key modules.>
+
+### references/business_analysis.md
+<Project-specific summary of product context and user journeys.>
+
+### references/contributor_analysis.md
+<Project-specific summary of contributor patterns and ownership.>
+
+## How to use this skill
+
+When working on `<project_name>`:
+
+1. Read this `SKILL.md` to orient yourself.
+2. Consult `references/file_analysis.md`, `references/business_analysis.md`, and `references/contributor_analysis.md` before exploring or changing code.
+3. Prefer these documents over re-scanning the full repository when they already answer your question.
+4. Re-read relevant reference files when entering unfamiliar areas or making non-trivial changes.
+```
+
+After creating the skill, verify the full output set exists and report paths:
+
+- `~/.<agent>/skills/<repo-name>-domain-knowledge/SKILL.md`
+- `~/.<agent>/skills/<repo-name>-domain-knowledge/references/file_analysis.md`
+- `~/.<agent>/skills/<repo-name>-domain-knowledge/references/business_analysis.md`
+- `~/.<agent>/skills/<repo-name>-domain-knowledge/references/contributor_analysis.md`
+
 ## Prerequisites
 
 - Run CLI commands from `skills/code-base-onboarding/` (paths like `projects/<repo>` are relative to the skill root).
@@ -172,11 +279,22 @@ After completion, verify the three output files exist and report:
 
 ## Outputs
 
+### Workflow outputs (Step 4)
+
 | File | Purpose |
 |------|---------|
 | `domain_knowledge/<project>/file_analysis.md` | Per-file structure and responsibilities |
 | `domain_knowledge/<project>/business_analysis.md` | Product context and user journeys |
 | `domain_knowledge/<project>/contributor_analysis.md` | Git contributor rollup |
+
+### Domain knowledge skill (Step 5)
+
+| File | Purpose |
+|------|---------|
+| `~/.<agent>/skills/<repo-name>-domain-knowledge/SKILL.md` | Personal agent skill: source repo, document summaries, usage instructions |
+| `~/.<agent>/skills/<repo-name>-domain-knowledge/references/file_analysis.md` | Copy of file analysis reference |
+| `~/.<agent>/skills/<repo-name>-domain-knowledge/references/business_analysis.md` | Copy of business analysis reference |
+| `~/.<agent>/skills/<repo-name>-domain-knowledge/references/contributor_analysis.md` | Copy of contributor analysis reference |
 
 ## Scripts and modules
 
