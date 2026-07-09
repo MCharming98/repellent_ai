@@ -448,10 +448,11 @@ def get_contributors(git_repo_path: str, file_path: str) -> List[str]:
         List[str]: List of contributor lines from git shortlog (commits, name, email).
     """
     result = subprocess.run(
-        ['git', 'shortlog', '-n', '-s', '-e', '--', file_path],
+        ['git', 'shortlog', '-n', '-s', '-e', 'HEAD', '--', file_path],
         capture_output=True,
         text=True,
-        cwd=git_repo_path
+        cwd=git_repo_path,
+        stdin=subprocess.DEVNULL,
     )
     if result.returncode != 0:
         return []
