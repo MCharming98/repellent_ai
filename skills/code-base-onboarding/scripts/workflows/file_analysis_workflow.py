@@ -1,0 +1,237 @@
+import asyncio
+import os
+from typing_extensions import NotRequired, TypedDict
+
+from langgraph.graph import END, START, StateGraph
+
+from agents.file_analyzer import FileAnalyzer
+from constants.file_analyzer_constants import get_file_analyzer_prompt_header
+from utils import *
+from utils.langchain import merge_token_usage_totals
+from utils.text import estimate_token_count
+
+# Reserved tokens for output / safety margin when sizing file batches.
+DEFAULT_FILE_ANALYSIS_TOKEN_BUFFER = 10_000
+# Avoid batching too many files into a single request as the model start to miss files in the response.
+MAX_FILES_PER_BATCH = 100
+
+
+class FileAnalysisWorkflow:
+    def __init__(
+        self,
+        read_directory: str,
+        write_directory: str,
+        file_batch_size: int,
+        model: str,
+        model_provider: str,
+        api_key: str,
+        model_context_window: int,
+    ):
+        self.read_directory = read_directory
+        self.file_batch_size = file_batch_size
+        self.write_directory = write_directory
+        self.model = model
+        self.model_provider = model_provider
+        self.api_key = api_key
+        self.model_context_window = model_context_window
+        self.token_usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+
+    class State(TypedDict):
+        read_directory: str
+        file_batch_size: int
+        write_directory: str
+        model: str
+        model_provider: str
+        model_context_window: int
+        api_key: str
+        source_code_files: list[str]
+        token_count_map: dict[str, int]
+        file_batches: list[list[str]]
+        agents: [FileAnalyzer]
+        token_usage: NotRequired[dict[str, int]]
+
+    # Nodes
+    def list_source_code_files(self, state: State):
+        files = list_source_files_recursive(state['read_directory'])
+        print(f"File Analysis Workflow: List {len(files)} source code files in {state['read_directory']}")
+        return {"source_code_files": files}
+
+    def estimate_file_token_count(self, state: State):
+        token_count_map: dict[str, int] = {}
+        read_dir = state["read_directory"]
+        model_provider = state["model_provider"]
+        model_name = state["model"]
+        model_context_window = state["model_context_window"]
+        total_files = len(state["source_code_files"])
+        print(
+            f"File Analysis Workflow: Estimating file tokens for {total_files} files..."
+        )
+
+        for i, rel_path in enumerate(state["source_code_files"], start=1):
+            if rel_path.startswith("Error:"):
+                continue
+            full_path = os.path.join(read_dir, rel_path)
+            content = read_file(full_path)
+            if content.startswith("Error:"):
+                token_count_map[rel_path] = 0
+                continue
+            n = estimate_token_count(
+                content,
+                model_provider,
+                model_context_window,
+                model_name=model_name,
+            )
+            if n > model_context_window:
+                print(
+                    f"Warning: File Analysis Workflow: File '{rel_path}' estimated at {n} tokens "
+                    f"exceeds model context window ({model_context_window}). Skipping this file."
+                )
+                continue
+            token_count_map[rel_path] = n
+            if i % 25 == 0 or i == total_files:
+                print(
+                    f"File Analysis Workflow: Estimated tokens for {i}/{total_files} files"
+                )
+        print(
+            f"File Analysis Workflow: Estimating file tokens completed "
+            f"({len(token_count_map)} files counted)"
+        )
+        return {"token_count_map": token_count_map}
+
+    def create_file_batches(self, state: State):
+        """Compute per-batch token budget for file content."""
+        buffer = DEFAULT_FILE_ANALYSIS_TOKEN_BUFFER
+        prompt_text = get_file_analyzer_prompt_header(1)
+        prompt_tokens = estimate_token_count(
+            prompt_text,
+            state["model_provider"],
+            state["model_context_window"],
+            model_name=state["model"],
+        )
+        limit = state["model_context_window"] - prompt_tokens - buffer
+        if limit < 0:
+            raise ValueError(
+                f"File batch token limit is negative ({limit}): model_context_window="
+                f"{state['model_context_window']} is too small for prompt (~{prompt_tokens} tokens) "
+                f"plus buffer ({buffer}). Increase model_context_window or reduce the prompt/buffer."
+            )
+
+        file_batches: list[list[str]] = []
+        current_batch: list[str] = []
+        current_tokens = 0
+        for rel_path, file_tokens in sorted(state["token_count_map"].items()):
+            batch_is_full = len(current_batch) >= MAX_FILES_PER_BATCH
+            exceeds_token_limit = current_tokens + file_tokens > limit
+            if current_batch and (batch_is_full or exceeds_token_limit):
+                file_batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+            current_batch.append(rel_path)
+            current_tokens += file_tokens
+        if current_batch:
+            file_batches.append(current_batch)
+
+        return {
+            "file_batches": file_batches,
+        }
+
+    def create_agents(self, state: State):
+        id = 0
+        agents: [FileAnalyzer] = []
+        for batch in state["file_batches"]:
+            if not batch:
+                continue
+            agent = FileAnalyzer(str(id), state['read_directory'], batch, state['write_directory'], state['model'], state['model_provider'], state['api_key'])
+            agents.append(agent)
+            id += 1
+        print(f"File Analysis Workflow: Created {len(agents)} agents")
+        return {"agents": agents}
+
+    def build_agents(self, state: State):
+        for agent in state["agents"]:
+            agent.build_workflow()
+        return {"agents": state["agents"]}
+
+    def run_agents(self, state: State):
+        # Run only agents that have not finished writing.
+        to_run = [a for a in state["agents"] if not a.write_status]
+        print(f"File Analysis Workflow: Running {len(to_run)} agents...")
+
+        async def _run():
+            results = await asyncio.gather(*[a.run() for a in to_run])
+            merged = merge_token_usage_totals(None, state.get("token_usage"))
+            for r in results:
+                if not isinstance(r, dict):
+                    continue
+                tu = r.get("token_usage")
+                if tu:
+                    merged = merge_token_usage_totals(merged, tu)
+                if not r.get("write_status", False):
+                    print(
+                        "Warning: File Analysis Workflow: agent "
+                        f"{r.get('id', '?')} returned write_status=False"
+                    )
+            self.token_usage = merged
+
+        asyncio.run(_run())
+        print(
+            f"File Analysis Workflow: Running {len(state['agents'])} agents completed"
+        )
+        return {"agents": state["agents"], "token_usage": self.token_usage}
+
+    def check_for_failed_agents(self, state: State) -> bool:
+        for agent in state["agents"]:
+            if not agent.write_status:
+                return True
+        return False
+
+    def build_workflow(self):
+        workflow = StateGraph(self.State)
+        workflow.add_node("list_source_code_files", self.list_source_code_files)
+        workflow.add_node("estimate_file_token_count", self.estimate_file_token_count)
+        workflow.add_node("create_file_batches", self.create_file_batches)
+        workflow.add_node("create_agents", self.create_agents)
+        workflow.add_node("build_agents", self.build_agents)
+        workflow.add_node("run_agents", self.run_agents)
+
+        workflow.add_edge(START, "list_source_code_files")
+        workflow.add_edge("list_source_code_files", "estimate_file_token_count")
+        workflow.add_edge("estimate_file_token_count", "create_file_batches")
+        workflow.add_edge("create_file_batches", "create_agents")
+        workflow.add_edge("create_agents", "build_agents")
+        workflow.add_edge("build_agents", "run_agents")
+        workflow.add_conditional_edges(
+            "run_agents",
+            self.check_for_failed_agents,
+            {True: "run_agents", False: END},
+        )
+        self.workflow = workflow.compile()
+
+    async def run(self):
+        print("File Analysis Workflow: Run workflow")
+        output_path = os.path.join(self.write_directory, "file_analysis.md")
+        if os.path.exists(output_path):
+            print(
+                f"File Analysis Workflow: '{output_path}' already exists; "
+                "skipping file analysis."
+            )
+            self.status = True
+            return
+        await self.workflow.ainvoke({
+            "read_directory": self.read_directory,
+            "file_batch_size": self.file_batch_size,
+            "write_directory": self.write_directory,
+            "model": self.model,
+            "model_provider": self.model_provider,
+            "model_context_window": self.model_context_window,
+            "api_key": self.api_key,
+            "source_code_files": [],
+            "token_count_map": {},
+            "file_batches": [],
+            "agents": [],
+        })
+        self.status = True
